@@ -39,15 +39,126 @@ WordCount *word_counts = NULL;
 #define MAX_WORD_LEN 64
 
 /*
- * 3.1.1 Total Word Count
- *
- * Returns the total amount of words found in infile.
+ * Returns the total number of words found in a file.
+ * 
+ * A word is: 1) a sequence of contiguous alphabetical characters; 2)
+ * sequence length should be greater than one, but no greater than the
+ * maximum length; 3) all words should be converted to lower-case and
+ * be treated non case-sensitively.
+ * 
+ * @param FILE* file A file pointer to the file.
+ * 
+ * @return int The number of words in the file. Or -1 if an error occurred.
+ * 
  * Useful functions: fgetc(), isalpha().
  */
-int num_words(FILE* infile) {
-  int num_words = 0;
+int num_words(FILE* file) {
+  char *functionName = "num_words";
+  // check for edge cases
+  if (file == NULL) {
+    fprintf(stderr, "Error from %s: the file pointer given was NULL", functionName);
+    return -1;
+  } else if (ferror(file)) {
+    fprintf(
+      stderr,
+      "Error from %s: an error (%d) exists in the given file stream",
+      functionName,
+      ferror(file)
+    );
+    return -1;
+  }
 
-  return num_words;
+  int numOfWords = 0;
+  char character;
+  // any return beyond this point should first free the word memory
+  char *word = (char*) malloc(sizeof(char) * (MAX_WORD_LEN + 1));
+  int wordPosition = 0;
+
+  // iterate until EOF to extract all words
+  while (!feof(file)) {
+
+    // get the next character from the file stream
+    character = (char) fgetc(file);
+    if (ferror(file)) {
+      fprintf(
+        stderr,
+        "Error from %s: an error (%d) occurred while getting character from the file stream",
+        functionName,
+        ferror(file)
+      );
+      free(word);
+      return -1;
+    }
+
+    /*
+     * if the returned character was EOF, the position indicator has
+     * reached the end of file, and all words should have been found;
+     * else if the returned character IS NOT an alphabet, skip it and
+     * continue onto the next word;
+     * otherwise, extract the word that starts from this character;
+     */ 
+    if (feof(file)) {
+      break;
+    } else if (!isalpha(character)) {
+      continue;
+    } else {
+      word[0] = character;
+      wordPosition = 1;
+
+      // extract the word starting at the current position
+      while (!feof(file)) {
+        character = (char) fgetc(file);
+        if (ferror(file)) {
+          fprintf(
+            stderr,
+            "Error from %s: an error (%d) occurred while getting character from the file stream",
+            functionName,
+            ferror(file)
+          );
+          free(word);
+          return -1;
+        }
+
+        /*
+         * if the returned character was EOF or not an alphabet, the position
+         * indicator has reached the end of the word, so exit from this loop;
+         * else if the length of the word has reached the size of the array,
+         * then then file violated the MAX_WORD_LEN limit;
+         * otherwise, append the returned character to the word, and continue
+         * onto the next character;
+         */
+        if (!isalpha(character)) {
+          break;
+        } else if (wordPosition >= MAX_WORD_LEN) {
+          /*
+           * this word has exceeded the MAX_WORD_LEN limit and overflew
+           * the word array, an error code should be returned
+           */
+          fprintf(
+            stderr,
+            "Error from %s: character sequence in the file stream exceeds the maximum %d characters limit",
+            functionName,
+            MAX_WORD_LEN
+          );
+          free(word);
+          return -1;
+        } else {
+          character = tolower(character);
+          word[wordPosition] = character;
+          wordPosition++;
+        }
+      }
+      // add the terminating null-char to the word
+      word[wordPosition] = '\0';
+      // add this word to the total number if its length is valid
+      int wordSize = strlen(word);
+      if (wordSize > 1 && wordSize <= MAX_WORD_LEN)
+        numOfWords++;
+    }
+  }
+
+  free(word);
+  return numOfWords;
 }
 
 /*
@@ -127,10 +238,31 @@ int main (int argc, char *argv[]) {
   if ((argc - optind) < 1) {
     // No input file specified, instead, read from STDIN instead.
     infile = stdin;
+    total_words = num_words(infile);
+    if (total_words == -1) {
+      fprintf(stderr, "Error occurred while counting the total number of words");
+      return -1;
+    }
   } else {
     // At least one file specified. Useful functions: fopen(), fclose().
     // The first file can be found at argv[optind]. The last file can be
     // found at argv[argc-1].
+    for (int filenameIndex = optind; filenameIndex < argc; filenameIndex++) {
+      infile = fopen(argv[filenameIndex], "r");
+      if (infile == NULL) {
+        perror(strcat("Failed to open file with the name ", argv[filenameIndex]));
+        return -1;
+      }
+
+      int numOfWordsInFile = num_words(infile);
+      fclose(infile);
+
+      if (numOfWordsInFile == -1) {
+        fprintf(stderr, "Error occurred while counting the total number of words");
+        return -1;
+      }
+      total_words += numOfWordsInFile;
+    }
   }
 
   if (count_mode) {
