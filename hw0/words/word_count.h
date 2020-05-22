@@ -32,8 +32,8 @@ Mutators take a reference to a list as first arg.
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Representation of a word count object.
    Includes next field for constructing singly linked list*/
@@ -58,17 +58,10 @@ WordCount *find_word(WordCount *wchead, char *word);
 /* Insert word with count=1, if not already present; increment count if present. */
 void add_word(WordCount **wclist, char *word);
 
-//static int wordcntcmp(const WordCount *wc1, WordCount *wc2);
-
 /* print word counts to a file */
 void fprint_words(WordCount *wchead, FILE *ofile);
-
-/* Inserts a word into the list in order. Assumes the existing list is already sorted */
-void wordcount_insert_ordered(WordCount **wclist, WordCount *elem, bool less(const WordCount *, const WordCount *));
 
 /* Sort a word count list in place */
 void wordcount_sort(WordCount **wclist, bool less(const WordCount *, const WordCount *));
 
 #endif /* word_count_h */
-
-

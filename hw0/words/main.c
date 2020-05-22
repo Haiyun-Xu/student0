@@ -22,13 +22,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include <assert.h>
+#include <ctype.h>
 #include <getopt.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
-#include <string.h>
-#include <ctype.h>
-#include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "word_count.h"
 
@@ -38,7 +38,7 @@ WordCount *word_counts = NULL;
 /* The maximum length of each word in a file */
 #define MAX_WORD_LEN 64
 
-/*
+/**
  * Returns the total number of words found in a file.
  * 
  * A word is: 1) a sequence of contiguous alphabetical characters; 2)
@@ -46,7 +46,7 @@ WordCount *word_counts = NULL;
  * maximum length; 3) all words should be converted to lower-case and
  * be treated non case-sensitively.
  * 
- * @param FILE* file A file pointer to the file.
+ * @param file A file pointer to the input file stream.
  * 
  * @return int The number of words in the file. Or -1 if an error occurred.
  * 
@@ -90,7 +90,7 @@ int num_words(FILE* file) {
       return -1;
     }
 
-    /*
+    /**
      * if the returned character was EOF, the position indicator has
      * reached the end of file, and all words should have been found;
      * else if the returned character IS NOT an alphabet, skip it and
@@ -119,7 +119,7 @@ int num_words(FILE* file) {
           return -1;
         }
 
-        /*
+        /**
          * if the returned character was EOF or not an alphabet, the position
          * indicator has reached the end of the word, so exit from this loop;
          * else if the length of the word has reached the size of the array,
@@ -130,7 +130,7 @@ int num_words(FILE* file) {
         if (!isalpha(character)) {
           break;
         } else if (wordPosition >= MAX_WORD_LEN) {
-          /*
+          /**
            * this word has exceeded the MAX_WORD_LEN limit and overflew
            * the word array, an error code should be returned
            */
@@ -161,8 +161,8 @@ int num_words(FILE* file) {
   return numOfWords;
 }
 
-/*
- * 3.1.2 Word Frequency Count
+/**
+ * TODO:
  *
  * Given infile, extracts and adds each word in the FILE to `wclist`.
  * Useful functions: fgetc(), isalpha(), tolower(), add_word().
@@ -170,12 +170,32 @@ int num_words(FILE* file) {
 void count_words(WordCount **wclist, FILE *infile) {
 }
 
-/*
- * Comparator to sort list by frequency.
- * Useful function: strcmp().
+/**
+ * Comparator to sort list by frequency, use alphabetical order as a secondary order.
+ * 
+ * @param wc1 The first WordCount operand
+ * @param wc2 The second WordCount operand
+ * 
+ * @return bool Whether the first WordCount comes before the second WordCount
  */
 static bool wordcount_less(const WordCount *wc1, const WordCount *wc2) {
-  return 0;
+  // if either pointer is NULL, it is the lesser one
+  if (wc1 == NULL) {
+    return true;
+  } else if (wc2 == NULL) {
+    return false;
+  }
+
+  // if either has a lower count, it is the lesser one
+  if (wc1->count < wc2->count) {
+    return true;
+  } else if (wc1->count > wc2->count) {
+    return false;
+  } else {
+    // if there's a tie, the one with the lower alphabetical order is the lesser one
+    return (strcmp(wc1->word, wc2->word) < 0);
+  }
+
 }
 
 // In trying times, displays a helpful message.
@@ -187,7 +207,7 @@ static int display_help(void) {
 	return 0;
 }
 
-/*
+/**
  * Handle command line flags and arguments.
  */
 int main (int argc, char *argv[]) {
