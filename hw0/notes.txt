@@ -1,3 +1,0 @@
-print each unique word as well as the number of times it occurred. The frequency should be sorted in ascending order of frequecy, and the ascending alphabetical order of words can serve as a secondary order.
-
-Implement the utility functions and the wordcount_insert_ordered() function in word_count.c, then wordcount_less() in main.c. These should be useful when implementing count_words() in main.c.
