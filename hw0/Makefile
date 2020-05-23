@@ -1,5 +1,5 @@
 CC?=gcc
-CFLAGS?=-g
+CFLAGS?=-Wall -g -m32
 BINARIES=map limits
 
 default:
