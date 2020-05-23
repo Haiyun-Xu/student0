@@ -1,18 +1,19 @@
-1.
+1. `gcc -m32 -S -o recurse.S recurse.c`
+The instructions that cooresponds to "recur(i-1)" are:
+	movl	8(%ebp), %eax
+	subl	$1, %eax
+	subl	$12, %esp
+	pushl	%eax
+	call	recur
 
-2.
+2. The .text section contains the function machine code, and the .data section (probably contains the static data?)
 
-3.
+3. `objdump --syms map.obj`
 
-4
+4. For a symbol, "g" means it is a global symbol and can be referenced by other object files, "O" means it is the name of an object, "F" means it is the name of a function, and "UND" means it is referenced in the current object file but defined elsewhere.
 
-5.
+5. "malloc" should appear in the symbol table of the object file of the source code that implements the <stdlib.h> header. It should be defined there as a global ("g") function ("F").
 
-6.
+6. The "recur" symbol should appear in the object file where it is defined in, i.e. recurse.obj. It is defined as "00000000 g     F .text  00000052 recur".
 
-7.
-
-8.
-
-9.
-
+7. The symbol "recur" is now defined and placed in the .text section.
