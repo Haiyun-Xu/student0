@@ -21,5 +21,10 @@ lwords.o word_count_l.o:
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+part3:
+	make clean
+	make words
+	$(CC) $(CFLAGS) word_count.o word_helpers.o -o part3.o part3.c
+
 clean:
 	rm -f $(EXECUTABLES) *.o
