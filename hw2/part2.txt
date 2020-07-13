@@ -1,0 +1,14 @@
+2.1
+    The program's output is different everytime it is run. The reason is that, once a thread is created and put on the waiting list, the time it executes becomes stochastic. The main thread, as well as any child thread, can be scheduled to run/or be interrupted at any time.
+
+2.2
+    The address of the argument "threadid" is different for each stack, so threads have their own stacks.
+
+2.3
+    The address of the global var "common" is the same across threads, so global variables are shared by threads.
+
+2.4
+    (void *)threadid is an 8-byte value that corresponds to the ID of the thread. On a 64-bit architecture, long and address are both 64-bits, so they can be interchangeably-casted. "threadid" is casted and passed as a void pointer only because that's the signature of pthread_create().
+
+2.5
+    I increased the heap allocation to 100K bytes (so that the somethingshared + tid access will not overflow), then ran 65,536 (2^16) threads and used the command "./pthread 65536 | grep "Thread" | wc -l" to count the number of threads created. The number caps at about 32K, which means only about 32K threads were created, leave alone scheduled and run. The reason is probably that the main thread progresses onto the next thread creation as soon as pthread_create() returns, and it exits immediately (causing the process to exit) at the end, without waiting for any of the child threads to complete.

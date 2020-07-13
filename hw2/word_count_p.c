@@ -20,6 +20,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/**
+ * @author Haiyun Xu <xuhaiyunhenry@gmail.com>
+ */
+
 #ifndef PINTOS_LIST
 #error "PINTOS_LIST must be #define'd when compiling word_count_lp.c"
 #endif

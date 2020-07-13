@@ -4,7 +4,7 @@
  * You may modify this file in any way you like, and are expected to modify it.
  * Your solution must read each input file from a separate thread. We encourage
  * you to make as few changes as necessary.
- */
+ */ 
 
 /*
  * Copyright © 2019 University of California, Berkeley
@@ -27,28 +27,54 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
-#include <pthread.h>
 
 #include "word_count.h"
 #include "word_helpers.h"
+#include "custom_helpers.h"
 
 /*
  * main - handle command line, spawning one thread per file.
  */
 int main(int argc, char *argv[]) {
   /* Create the empty data structure. */
-  word_count_list_t word_counts;
-  init_words(&word_counts);
+  word_count_list_t wordCountList;
+  init_words(&wordCountList);
 
   if (argc <= 1) {
     /* Process stdin in a single thread. */
-    count_words(&word_counts, stdin);
+    count_words(&wordCountList, stdin);
   } else {
-    /* TODO */
+    /**
+     * open each of the files, create child threads, then pass them the routine
+     * count_words_p() and the argument struct to each of the child threads.
+     */
+    int numOfThreads = argc - 1, threadCreationResult;
+    FILE **filePtrs = openFiles(numOfThreads, &(argv[1]));
+    count_words_arg_t *arguments = malloc(sizeof(count_words_arg_t) * numOfThreads);
+    pthread_t *threadPool = malloc(sizeof(pthread_t) * numOfThreads);
+
+    for (int index = 0; index < numOfThreads; index++) {
+      // populate the argument struct
+      count_words_arg_t argument = arguments[index];
+      argument.wordCountListPtr = &index;
+      argument.inputFilePtr = filePtrs[index];
+
+      int creationError = pthread_create(&(threadPool[index]), NULL, count_words_p, (void *)(&argument));
+      if (creationError) {
+        printf("Failed to create thread %d", index);
+        abortWordCount(numOfThreads, threadPool, &wordCountList, filePtrs, arguments);
+        return 1;
+      }
+    }
+
+    // wait for all the child threads to complete before proceeding
+    joinThreadPool(numOfThreads, threadPool);
   }
 
+  /** TODO: implement count_words_p() and the multithreaded methods that it uses */
+
   /* Output final result of all threads' work. */
-  wordcount_sort(&word_counts, less_count);
-  fprint_words(&word_counts, stdout);
+  wordcount_sort(&wordCountList, less_count);
+  fprint_words(&wordCountList, stdout);
   return 0;
 }

@@ -36,6 +36,8 @@
  * PINTOS_LIST and/or PTHREADS are #define'd prior to #include to select the
  * representations.
  */
+#define PINTOS_LIST 1
+#define PTHREADS 1
 
 #ifdef PINTOS_LIST
 #include "list.h"
