@@ -1,7 +1,7 @@
 /**
  * @author Haiyun Xu <xuhaiyunhenry@gmail.com>
  * 
- * An explanation of PINTOS list.h structure:
+ * NOTE: An explanation of PINTOS list.h structure:
  * A list struct always contains a head and a tail. They are the sentinel
  * elements surrounding the internal elements.
  * 
@@ -11,6 +11,40 @@
  * 
  * In a non-empty list, we have [head => front (beginning) => back (reverse
  * beginning) => tail].
+ * 
+ * NOTE: All of the following functions must acquire the lock before any
+ * action, and release the lock before returning. Even the edge case check
+ * needs to occur after acquiring exclusive usage right (EUR), because if
+ * the check passes and only then does the function acquires the lock, it
+ * may proceed with the wrong assumption that the shared object is still
+ * valid; in our case, the shared object pointed by the argument pointer
+ * could well be freed by another thread (when the current thread is
+ * interrupted and waiting) and hence not-existent anymore.
+ * 
+ * This means that we are accessing a pointer without checking if it's valid
+ * first, and certainlycan trigger segfault if the argument pointer is NULL.
+ * But that's better than mandating that the pointer must be checked again
+ * after acquisition of the lock - which is confusing and easy to forget.
+ * 
+ * NOTE: The functions that directly operate on the shared object, i.e. 
+ * acquires/releases the shared object's lock, must not exit early, i.e. 
+ * return between the lock acquire/release lines.
+ * 
+ * That will leave the shared object's ownership in a "claimed" state
+ * and cause a deadlock. To prevent a return value discrepancy, we can
+ * declare the default return value right after acquiring the lock, and then
+ * check for edge cases and allow edge cases to skip the main logic and 
+ * immediately return the default return value.
+ * 
+ * NOTE: Functions that do not directly operate on the shared object DO NOT
+ * need to acquire/release the lock on the shared object. This is especially
+ * important when a function uses other functions that directly operate on
+ * the shared object: if the parent function claimed the lock and becomes
+ * blocked before the child function returns, the child function wouldn't be
+ * able to acquire the lock and will cause a deadlock.
+ * 
+ *  pthread_mutex_lock(&(wclist->lock));
+ *  pthread_mutex_unlock(&(wclist->lock));
  */
 
 #include "custom_helpers.h"
@@ -36,7 +70,7 @@ void closeFiles(int count, FILE** filePtrs) {
 
 /**
  * Given an array of filenames, open all the files and return their pointers
- * in an array.
+ * in an array. If an error occurred, return a NULL pointer.
  * 
  * @param count The number of files to open
  * @param fileNamePtrs The array of names of the files to be opened
@@ -53,6 +87,8 @@ FILE** openFiles(int count, char* fileNamePtrs[]) {
    * prematurely, we dont treat garbage values as file pointers.
    */
   FILE **filePtrs = (FILE**) calloc(count, sizeof(FILE*));
+  if (filePtrs == NULL) return NULL;
+
   FILE* filePtr = NULL;
   char messageBuffer[100];
 
@@ -60,9 +96,10 @@ FILE** openFiles(int count, char* fileNamePtrs[]) {
     char* fileName = fileNamePtrs[fileNameIndex];
 
     if((filePtr = fopen(fileName, "r")) == NULL) {
-      closeFiles(count, filePtrs);
-      sprintf(messageBuffer, "fopen() failed to open file %s.", fileName);
+      sprintf(messageBuffer, "fopen() failed to open file %s.\n", fileName);
       perror(messageBuffer);
+
+      closeFiles(count, filePtrs);
       return NULL;
     }
 
@@ -70,15 +107,6 @@ FILE** openFiles(int count, char* fileNamePtrs[]) {
   }
   return filePtrs;
 }
-
-/**
- * A custom type for passing both the word count list and the input file
- * pointer as one argument to a new thread.
- */
-typedef struct count_words_arg {
-  word_count_list_t * wordCountListPtr;
-  FILE *inputFilePtr;
-} count_words_arg_t;
 
 /**
  * Clean up the word count list.
@@ -102,7 +130,7 @@ void cleanUpWordCountList(word_count_list_t* wordCountListPtr) {
   struct list_elem *lstElement = list_begin(lst);
 
   // if the list is empty, the execution skip this loop
-  while (lstElement != list_tail(lst)) {
+  while (lstElement != list_end(lst)) {
     /*
      * first update the pointer to the next list element, because the current
      * one will be freed at the end of the loop, and we won't be able to find
@@ -118,7 +146,6 @@ void cleanUpWordCountList(word_count_list_t* wordCountListPtr) {
     free(wordCount);
   }
 
-  free(wordCountListPtr);
   return;
 }
 
@@ -133,18 +160,21 @@ void joinThreadPool(int numOfThreads, pthread_t *threadPool) {
   if (numOfThreads <= 0 || threadPool == NULL) return;
 
   for (int index = 0; index < numOfThreads; index++) {
+    /*
+     * exitError will contain the exit value of the thread starter routine;
+     * in this case it will be an interger
+     */
     int exitError;
     int joiningError = pthread_join(threadPool[index], (void **)(&exitError));
 
     if (joiningError)
-      printf("Failed to wait for thread %d to exit.", index);
+      printf("Failed to wait for thread %d to exit.\n", index);
 
     if (exitError)
-      printf("Joined with thread %d which exited with status %d.", index, exitError);
+      printf("Joined with thread %d which exited with status %d.\n", index, exitError);
   }
   return;
 }
-
 
 /**
  * Clean up the thread pool.
@@ -156,18 +186,18 @@ void cleanUpThreadPool(int numOfThreads, pthread_t *threadPool) {
   // edge cases
   if (numOfThreads <= 0 || threadPool == NULL) return;
   
-  /*
-  * send termination signal to the created threads, and wait for all of
-  * them to exit before freeing the thread pool memory block, because the signals
-  * are handled asynchronously by target threads.
-  */
+  // send termination signal to the created threads
   for (int index = 0; index < numOfThreads; index++) {
     int signallingError = pthread_kill(threadPool[index], SIGTERM);
 
     if (signallingError)
-      printf("Failed to send SIGTERM to thread %d.", index);
+      printf("Failed to send SIGTERM to thread %d.\n", index);
   }
 
+  /* 
+   * wait for all the threads to exit before freeing the thread pool memory
+   * block, because the signals are handled asynchronously by target threads.
+   */
   joinThreadPool(numOfThreads, threadPool);
   free(threadPool);
   return;
@@ -201,11 +231,85 @@ void abortWordCount(
 }
 
 /**
+ * Extract the next word from the file.
+ * 
+ * @param file The input file pointer
+ * 
+ * @return char* pointer to the extracted word
+ */
+static char *get_word(FILE* file) {
+  // edge cases
+  if (file == NULL) return NULL;
+
+  // first skip over all non-alphabetical characters at the beginning;
+  // then extract the characters one at a time, converting them to lower
+  // case, and adding them to the word;
+  // loop until a non-alphabetical character is found;
+  // append a null-char to the end of the word, and return the address of the word
+
+  /*
+   * skip over all non-alphabetical characters, until an EOF or an alphabet
+   * is met. In the first case, the file index has reached the end, so return
+   * NULL; in the second case, break out of the loop and proceed
+   */
+  int character;
+  while (!isalpha(character = fgetc(file))) {
+    if (character == EOF)
+      return NULL;
+  }
+
+  int index = 0, word_size = 16;
+  char *word = malloc(word_size * sizeof(char));
+  if (word == NULL) {
+    printf("Failed to allocate memory for new word in file.\n");
+    return NULL;
+  }
+
+  do {
+    /*
+     * if the index is at the last byte , we must double the size of the word
+     * buffer by reallocating
+     */
+    if (index == (word_size - 1)) {
+      word_size *= 2;
+      char *new_word = (char*) realloc(word, word_size);
+      if (new_word == NULL) {
+        printf("Failed to re-allocate memory for new word in file.\n");
+        free(word);
+        return NULL;
+      }
+      word = new_word;
+    }
+
+    word[index++] = tolower(character);
+  } while (isalpha(character = fgetc(file)));
+
+  // remember to terminate the word buffer with a nul-char
+  word[index] = "\0";
+  return word;
+}
+
+/**
  * A multi-threaded version of count_words(), accepting a struct instead
  * of two separate arguments as argument.
  * 
  * @param arg The struct containing the word_count_list_t* and the input File*
  */
 void count_words_p(count_words_arg_t *arg) {
+  word_count_list_t *wclist = arg->wordCountListPtr;
+  FILE *inputFile = arg->inputFilePtr;
+
+  char* word;
+
+  while ((word = get_word(inputFile)) != NULL) {
+    // only count words that are longer than one alphabet
+    if (strlen(word) == 1)
+      free(word);
+    // if the function failed to add the word to the list
+    else if (add_word(&wclist, word) == NULL) {
+      free(word);
+      return;
+    }
+  }
   return;
 }

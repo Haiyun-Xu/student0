@@ -22,6 +22,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/**
+ * @author Haiyun Xu <xuhaiyunhenry@gmail.com>
+ */
+
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -37,6 +41,10 @@
  */
 int main(int argc, char *argv[]) {
   /* Create the empty data structure. */
+  int numOfThreads = 0;
+  FILE **filePtrs = NULL;
+  pthread_t *threadPool = NULL;
+  count_words_arg_t *arguments = NULL;
   word_count_list_t wordCountList;
   init_words(&wordCountList);
 
@@ -45,23 +53,35 @@ int main(int argc, char *argv[]) {
     count_words(&wordCountList, stdin);
   } else {
     /**
-     * open each of the files, create child threads, then pass them the routine
-     * count_words_p() and the argument struct to each of the child threads.
+     * open each of the files, create child threads, and create the array of
+     * arguments for thread's starter routine.
      */
-    int numOfThreads = argc - 1, threadCreationResult;
-    FILE **filePtrs = openFiles(numOfThreads, &(argv[1]));
-    count_words_arg_t *arguments = malloc(sizeof(count_words_arg_t) * numOfThreads);
-    pthread_t *threadPool = malloc(sizeof(pthread_t) * numOfThreads);
+    numOfThreads = argc - 1;
+    filePtrs = openFiles(numOfThreads, &(argv[1]));
+    threadPool = malloc(sizeof(pthread_t) * numOfThreads);
+    arguments = malloc(sizeof(count_words_arg_t) * numOfThreads);
+
+    /* 
+     * if any of the data structures failed to be created, print the error
+     * message, then clean up and return an error code.
+     */
+    if (filePtrs == NULL || arguments == NULL || threadPool == NULL) {
+      if (filePtrs == NULL) printf("Failed to allocate memory for file pointers.\n");
+      if (threadPool == NULL) printf("Failed to allocate memory for thread pool.\n");
+      if (arguments == NULL) printf("Failed to allocate memory for thread argments.\n");
+      abortWordCount(numOfThreads, threadPool, &wordCountList, filePtrs, arguments);
+      return 1;
+    }
 
     for (int index = 0; index < numOfThreads; index++) {
-      // populate the argument struct
+      // populate the argument struct for a thread's starter routine
       count_words_arg_t argument = arguments[index];
-      argument.wordCountListPtr = &index;
+      argument.wordCountListPtr = &wordCountList;
       argument.inputFilePtr = filePtrs[index];
 
       int creationError = pthread_create(&(threadPool[index]), NULL, count_words_p, (void *)(&argument));
       if (creationError) {
-        printf("Failed to create thread %d", index);
+        printf("Failed to create thread %d.\n", index);
         abortWordCount(numOfThreads, threadPool, &wordCountList, filePtrs, arguments);
         return 1;
       }
@@ -71,10 +91,9 @@ int main(int argc, char *argv[]) {
     joinThreadPool(numOfThreads, threadPool);
   }
 
-  /** TODO: implement count_words_p() and the multithreaded methods that it uses */
-
-  /* Output final result of all threads' work. */
+  // print the final result of all threads' work.
   wordcount_sort(&wordCountList, less_count);
   fprint_words(&wordCountList, stdout);
+  abortWordCount(numOfThreads, threadPool, &wordCountList, filePtrs, arguments);
   return 0;
 }
