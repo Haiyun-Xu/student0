@@ -139,7 +139,7 @@ word_count_t *increment_count(word_count_list_t *wclist, word_count_t *wc) {
  *        is used to guarantee Exclusive Usage Rights of this function
  * @param word The word to be contained in the new word_count_t
  */
-word_count_t * create_word(word_count_list_t *wclist, char *word) {
+word_count_t *create_word(word_count_list_t *wclist, char *word) {
   pthread_mutex_lock(&(wclist->lock));
 
   word_count_t *wc = NULL;
@@ -259,10 +259,3 @@ void wordcount_sort(
   pthread_mutex_unlock(&(wclist->lock));
   return;
 }
-
-/*
- * Insert word with count, if not already present; increment count if present.
- * Takes ownership of word.
- */
-word_count_t *add_word_with_count(word_count_list_t *wclist, char *word,
-                                  int count);

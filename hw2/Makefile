@@ -9,21 +9,22 @@ all: $(EXECUTABLES)
 
 pthread: pthread.o
 lwords: lwords.o word_count_l.o word_helpers.o list.o debug.o
-pwords: pwords.o word_count_p.o word_helpers.o list.o debug.o custom_helper.o
+pwords: pwords.o word_count_p.o word_helpers.o custom_helpers.o list.o debug.o
 
 $(EXECUTABLES):
 	$(CC) $(LDFLAGS) $^ -o $@
 
 lwords.o: words.c
 pwords.o: pwords.c
-custom_helper.o: custom_helper.c
-word_count_p.o: word_count_p.c
 word_count_l.o: word_count_l.c
+word_count_p.o: word_count_p.c
+word_helpers.o: word_helpers.c
+custom_helpers.o: custom_helpers.c
 
-lwords.o word_count_l.o:
+lwords.o word_count_l.o word_helpers.o:
 	$(CC) $(CFLAGS) -DPINTOS_LIST -c $< -o $@
 
-pwords.o word_count_p.o custom_helper.o:
+pwords.o word_count_p.o custom_helpers.o:
 	$(CC) $(CFLAGS) -DPINTOS_LIST -DPTHREADS -c $< -o $@
 
 %.o: %.c

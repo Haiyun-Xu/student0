@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
   }
 
   // print the final result of all threads' work.
-  wordcount_sort(&wordCountList, less_count);
+  wordcount_sort(&wordCountList, less_word_p);
   fprint_words(&wordCountList, stdout);
   abortWordCount(numOfThreads, threadPool, &wordCountList, filePtrs, arguments);
   return 0;

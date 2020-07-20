@@ -6,8 +6,7 @@
 #define CUSTOM_HELPERS_H
 
 #include <pthread.h>
-
-#include "word_helpers.h"
+#include <signal.h>
 #include "word_count.h"
 
 /**
@@ -85,7 +84,23 @@ void abortWordCount(
  * of two separate arguments as argument.
  * 
  * @param arg The struct containing the word_count_list_t* and the input File*
+ * 
+ * @return void* The return value indicates whether the function succeeded (0)
+ *         or failed (non-zero values); it is only casted as void* to conform
+ *         to the pthread_create() interface.
  */
-void count_words_p(count_words_arg_t *arg);
+void *count_words_p(void *arg);
+
+/**
+ * Returns whether the first word is less than the second word. First use
+ * the count for ordering, then use the alphabetical order if the count was
+ * a tie.
+ * 
+ * @param wc1 The first word_count_t
+ * @param wc2 The second worc_count_t
+ * 
+ * @return bool Whether the first word is less than the second word
+ */
+bool less_word_p(const word_count_t *wc1, const word_count_t *wc2);
 
 #endif

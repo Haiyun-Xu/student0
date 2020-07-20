@@ -237,7 +237,7 @@ void abortWordCount(
  * 
  * @return char* pointer to the extracted word
  */
-static char *get_word(FILE* file) {
+static char *get_word_p(FILE* file) {
   // edge cases
   if (file == NULL) return NULL;
 
@@ -259,7 +259,7 @@ static char *get_word(FILE* file) {
   }
 
   int index = 0, word_size = 16;
-  char *word = malloc(word_size * sizeof(char));
+  char *word = (char*) malloc(word_size * sizeof(char));
   if (word == NULL) {
     printf("Failed to allocate memory for new word in file.\n");
     return NULL;
@@ -285,7 +285,7 @@ static char *get_word(FILE* file) {
   } while (isalpha(character = fgetc(file)));
 
   // remember to terminate the word buffer with a nul-char
-  word[index] = "\0";
+  word[index] = '\0';
   return word;
 }
 
@@ -294,22 +294,46 @@ static char *get_word(FILE* file) {
  * of two separate arguments as argument.
  * 
  * @param arg The struct containing the word_count_list_t* and the input File*
+ * 
+ * @return void* The return value indicates whether the function succeeded (0)
+ *         or failed (non-zero values); it is only casted as void* to conform
+ *         to the pthread_create() interface.
  */
-void count_words_p(count_words_arg_t *arg) {
-  word_count_list_t *wclist = arg->wordCountListPtr;
-  FILE *inputFile = arg->inputFilePtr;
+void *count_words_p(void *arg) {
+  count_words_arg_t *argument = (count_words_arg_t *) arg;
+  word_count_list_t *wclist = argument->wordCountListPtr;
+  FILE *inputFile = argument->inputFilePtr;
 
   char* word;
 
-  while ((word = get_word(inputFile)) != NULL) {
+  while ((word = get_word_p(inputFile)) != NULL) {
     // only count words that are longer than one alphabet
     if (strlen(word) == 1)
       free(word);
     // if the function failed to add the word to the list
-    else if (add_word(&wclist, word) == NULL) {
+    else if (add_word(wclist, word) == NULL) {
       free(word);
-      return;
+      return (void*) 1;
     }
   }
-  return;
+  return (void*) 0;
+}
+
+/**
+ * Returns whether the first word is less than the second word. First use
+ * the count for ordering, then use the alphabetical order if the count was
+ * a tie.
+ * 
+ * @param wc1 The first word_count_t
+ * @param wc2 The second worc_count_t
+ * 
+ * @return bool Whether the first word is less than the second word
+ */
+bool less_word_p(const word_count_t *wc1, const word_count_t *wc2) {
+  // edge cases
+  if (wc1 == NULL || wc2 == NULL) return false;
+
+  if (wc1->count < wc2->count) return true;
+  else if (wc1->count > wc2->count) return false;
+  else return (strcmp(wc1->word, wc2->word) < 0);
 }
