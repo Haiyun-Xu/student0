@@ -22,6 +22,40 @@
 
 /**
  * @author Haiyun Xu <xuhaiyunhenry@gmail.com>
+ * 
+ * NOTE: All of the following functions must acquire the lock before any
+ * action, and release the lock before returning. Even the edge case check
+ * needs to occur after acquiring exclusive usage right (EUR), because if
+ * the check passes and only then does the function acquires the lock, it
+ * may proceed with the wrong assumption that the shared object is still
+ * valid; in our case, the shared object pointed by the argument pointer
+ * could well be freed by another thread (when the current thread is
+ * interrupted and waiting) and hence not-existent anymore.
+ * 
+ * This means that we are accessing a pointer without checking if it's valid
+ * first, and certainlycan trigger segfault if the argument pointer is NULL.
+ * But that's better than mandating that the pointer must be checked again
+ * after acquisition of the lock - which is confusing and easy to forget.
+ * 
+ * NOTE: The functions that directly operate on the shared object, i.e. 
+ * acquires/releases the shared object's lock, must not exit early, i.e. 
+ * return between the lock acquire/release lines.
+ * 
+ * That will leave the shared object's ownership in a "claimed" state
+ * and cause a deadlock. To prevent a return value discrepancy, we can
+ * declare the default return value right after acquiring the lock, and then
+ * check for edge cases and allow edge cases to skip the main logic and 
+ * immediately return the default return value.
+ * 
+ * NOTE: Functions that do not directly operate on the shared object DO NOT
+ * need to acquire/release the lock on the shared object. This is especially
+ * important when a function uses other functions that directly operate on
+ * the shared object: if the parent function claimed the lock and becomes
+ * blocked before the child function returns, the child function wouldn't be
+ * able to acquire the lock and will cause a deadlock.
+ * 
+ *  pthread_mutex_lock(&(wclist->lock));
+ *  pthread_mutex_unlock(&(wclist->lock));
  */
 
 #ifndef PINTOS_LIST
@@ -36,18 +70,27 @@
 
 /**
  * Initialize a word count list (shared). The word count list should already
- * be created in memory.
+ * be created in memory, and has an uninitialized pthread_mutex_t lock.
  * 
  * @param wclist The word count list, shared by multithreads
  */
 void init_words(word_count_list_t *wclist) {
-  pthread_mutex_lock(&(wclist->lock));
+  /*
+   * this function should be called by the main thread, when no child thread
+   * has been created yet. Since the mutex lock is not yet initialized, it
+   * cannot be acquired.
+   * 
+   * the lock has been instantiated but not initialized, so it is in the
+   * locked state (owned by pid=0, the system) and cannot be acquired.
+   * In fact, pthread_mutex_trylock() returned EINVAL=22 when called
+   * immediately on wclist->lock, without initialization.
+   */
+  pthread_mutex_init(&(wclist->lock), NULL);
 
   // edge cases return immediately
   if (wclist != NULL)
     list_init(&(wclist->lst));
 
-  pthread_mutex_unlock(&(wclist->lock));
   return;
 }
 
@@ -82,6 +125,9 @@ size_t len_words(word_count_list_t *wclist) {
  * Find a word in a word_count list (shared). Return the word_count_t if
  * found, or return NULL if not found.
  * 
+ * WARN: this function should only be called by a function that holds the
+ * mutex lock.
+ * 
  * @param wclist The word count list, shared by multithreads
  * @param word The target word
  * 
@@ -89,10 +135,9 @@ size_t len_words(word_count_list_t *wclist) {
  * word; NULL if the word is not found in the list
  */
 word_count_t *find_word(word_count_list_t *wclist, char *word) {
-  pthread_mutex_lock(&(wclist->lock));
-
   word_count_t *wc = NULL;
 
+  // edge cases return immediately
   if (wclist != NULL && word != NULL) {
     struct list *lst = &(wclist->lst);
     struct list_elem *element = list_begin(lst);
@@ -107,12 +152,14 @@ word_count_t *find_word(word_count_list_t *wclist, char *word) {
     }
   }
 
-  pthread_mutex_unlock(&(wclist->lock));
   return wc;
 }
 
 /**
  * Increment the count of a word.
+ * 
+ * WARN: this function should only be called by a function that holds the
+ * mutex lock.
  * 
  * @param wclist The word count list, shared by multithreads and containing
  *        the given word_count_t; its mutex lock is used to guarantee Exclusive
@@ -120,13 +167,10 @@ word_count_t *find_word(word_count_list_t *wclist, char *word) {
  * @param wc The word_count_t containing the target word
  */
 word_count_t *increment_count(word_count_list_t *wclist, word_count_t *wc) {
-  pthread_mutex_lock(&(wclist->lock));
-
   // edge cases return immediately
   if (wclist != NULL && wc != NULL)
     wc->count += 1;
 
-  pthread_mutex_unlock(&(wclist->lock));
   return wc;
 }
 
@@ -135,13 +179,14 @@ word_count_t *increment_count(word_count_list_t *wclist, word_count_t *wc) {
  * to the given word count list. Must copy the content of word into a new
  * memory block.
  * 
+ * WARN: this function should only be called by a function that holds the
+ * mutex lock.
+ * 
  * @param wclist The word count list, shared by mutithreads; its mutex lock
  *        is used to guarantee Exclusive Usage Rights of this function
  * @param word The word to be contained in the new word_count_t
  */
 word_count_t *create_word(word_count_list_t *wclist, char *word) {
-  pthread_mutex_lock(&(wclist->lock));
-
   word_count_t *wc = NULL;
 
   // edge cases return immediately
@@ -158,30 +203,53 @@ word_count_t *create_word(word_count_list_t *wclist, char *word) {
     }
   }
 
-  pthread_mutex_unlock(&(wclist->lock));
   return wc;
 }
 
 /**
- * Add a word to the word count list. If the word is not already present,
+ * Add a word to the word count list (shared). If the word is not already present,
  * create the word node with count=1; if already present, increment its count.
+ * Always free the given word.
+ * 
+ * WARN: the find and increment/create logic MUST be executed thoroughly
+ * within a critical section, with no breaks in between. The reason is that,
+ * if thread A released the lock after not being able to find the word_count_t
+ * containing the target word, thread B could acquire the lock and be looking
+ * for the same word. Both of them would fail to find the word and both insert
+ * a new word_count_t into the list. However (depending on the search algorithm),
+ * with a find() function that implements linear search, only the latter
+ * inserted word_count_t, i.e. the one in the front, will be incremented
+ * when that word appears again, because the former inserted word_count_t
+ * will never be returned from the find() function. 
  * 
  * @param wclist The word count list, shared by multithreads
  * @param word the target word
  * 
  * @return word_count_t* Pointer to the word_count_t containing the target
- * word; NULL if the arguments were wrong and the word cannot be added
+ * word; NULL if the arguments were wrong or if the word cannot be added
  */
 word_count_t *add_word(word_count_list_t *wclist, char *word) {
-  // edge cases
+  pthread_mutex_lock(&(wclist->lock));
+  
+  word_count_t* wc = NULL;
+  /*
+   * edge cases; the address of wclist is not an internal state and is
+   * shared by all threads. Accessing it does not require locking.
+   */
   if (wclist == NULL || word == NULL) return NULL;
 
-  word_count_t* wc = find_word(wclist, word);
+  /*
+   * the address of a word_count_t within the list is not an internal state
+   * of the word count list either, and it is constant throughout the lifetime
+   * of the word count list. Accessing it does not require locking.
+   */
+  wc = find_word(wclist, word);
   if (wc != NULL)
     wc = increment_count(wclist, wc);
   else
     wc = create_word(wclist, word);
   
+  pthread_mutex_unlock(&(wclist->lock));
   return wc;
 }
 

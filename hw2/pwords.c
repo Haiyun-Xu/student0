@@ -45,12 +45,14 @@ int main(int argc, char *argv[]) {
   FILE **filePtrs = NULL;
   pthread_t *threadPool = NULL;
   count_words_arg_t *arguments = NULL;
-  word_count_list_t wordCountList;
-  init_words(&wordCountList);
+
+  // the word count list is a shared data structure, and so must be placed on the heap
+  word_count_list_t *wordCountListPtr = (word_count_list_t*) malloc(sizeof(word_count_list_t));
+  init_words(wordCountListPtr);
 
   if (argc <= 1) {
     /* Process stdin in a single thread. */
-    count_words(&wordCountList, stdin);
+    count_words(wordCountListPtr, stdin);
   } else {
     /**
      * open each of the files, create child threads, and create the array of
@@ -58,8 +60,8 @@ int main(int argc, char *argv[]) {
      */
     numOfThreads = argc - 1;
     filePtrs = openFiles(numOfThreads, &(argv[1]));
-    threadPool = malloc(sizeof(pthread_t) * numOfThreads);
-    arguments = malloc(sizeof(count_words_arg_t) * numOfThreads);
+    threadPool = (pthread_t *) malloc(sizeof(pthread_t) * numOfThreads);
+    arguments = (count_words_arg_t *) malloc(sizeof(count_words_arg_t) * numOfThreads);
 
     /* 
      * if any of the data structures failed to be created, print the error
@@ -69,20 +71,24 @@ int main(int argc, char *argv[]) {
       if (filePtrs == NULL) printf("Failed to allocate memory for file pointers.\n");
       if (threadPool == NULL) printf("Failed to allocate memory for thread pool.\n");
       if (arguments == NULL) printf("Failed to allocate memory for thread argments.\n");
-      abortWordCount(numOfThreads, threadPool, &wordCountList, filePtrs, arguments);
+      cleanUp(numOfThreads, threadPool, wordCountListPtr, filePtrs, arguments, true);
       return 1;
     }
 
     for (int index = 0; index < numOfThreads; index++) {
-      // populate the argument struct for a thread's starter routine
-      count_words_arg_t argument = arguments[index];
-      argument.wordCountListPtr = &wordCountList;
-      argument.inputFilePtr = filePtrs[index];
+      /*
+       * populate the argument struct for a thread's starter routine;
+       * note that we must modify the structs in the arguments array,
+       * so we must use a pointer reference here
+       */
+      count_words_arg_t *argument = &(arguments[index]);
+      argument->wordCountListPtr = wordCountListPtr;
+      argument->inputFilePtr = filePtrs[index];
 
-      int creationError = pthread_create(&(threadPool[index]), NULL, count_words_p, (void *)(&argument));
+      int creationError = pthread_create(&(threadPool[index]), NULL, count_words_p, (void *)argument);
       if (creationError) {
         printf("Failed to create thread %d.\n", index);
-        abortWordCount(numOfThreads, threadPool, &wordCountList, filePtrs, arguments);
+        cleanUp(numOfThreads, threadPool, wordCountListPtr, filePtrs, arguments, true);
         return 1;
       }
     }
@@ -92,8 +98,8 @@ int main(int argc, char *argv[]) {
   }
 
   // print the final result of all threads' work.
-  wordcount_sort(&wordCountList, less_word_p);
-  fprint_words(&wordCountList, stdout);
-  abortWordCount(numOfThreads, threadPool, &wordCountList, filePtrs, arguments);
+  wordcount_sort(wordCountListPtr, less_word_p);
+  fprint_words(wordCountListPtr, stdout);
+  cleanUp(numOfThreads, threadPool, wordCountListPtr, filePtrs, arguments, false);
   return 0;
 }

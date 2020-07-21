@@ -5,6 +5,7 @@
 #ifndef CUSTOM_HELPERS_H
 #define CUSTOM_HELPERS_H
 
+#include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include "word_count.h"
@@ -69,14 +70,16 @@ void cleanUpThreadPool(int numOfThreads, pthread_t *threadPool);
  * @param threadPool An array of pthread_t
  * @param wordCountList A word count list
  * @param filePtrs An array of FILE*
- * @param argArray An array of count_words_arg_t
+ * @param arguments An array of count_words_arg_t
+ * @param abort Whether this cleaup is an abort in the middle of the program
  */
-void abortWordCount(
+void cleanUp(
   int numOfThreads,
   pthread_t *threadPool,
   word_count_list_t *wordCountList,
   FILE **filePtrs,
-  count_words_arg_t *argArray
+  count_words_arg_t *arguments,
+  bool abort
 );
 
 /**

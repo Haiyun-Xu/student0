@@ -11,40 +11,6 @@
  * 
  * In a non-empty list, we have [head => front (beginning) => back (reverse
  * beginning) => tail].
- * 
- * NOTE: All of the following functions must acquire the lock before any
- * action, and release the lock before returning. Even the edge case check
- * needs to occur after acquiring exclusive usage right (EUR), because if
- * the check passes and only then does the function acquires the lock, it
- * may proceed with the wrong assumption that the shared object is still
- * valid; in our case, the shared object pointed by the argument pointer
- * could well be freed by another thread (when the current thread is
- * interrupted and waiting) and hence not-existent anymore.
- * 
- * This means that we are accessing a pointer without checking if it's valid
- * first, and certainlycan trigger segfault if the argument pointer is NULL.
- * But that's better than mandating that the pointer must be checked again
- * after acquisition of the lock - which is confusing and easy to forget.
- * 
- * NOTE: The functions that directly operate on the shared object, i.e. 
- * acquires/releases the shared object's lock, must not exit early, i.e. 
- * return between the lock acquire/release lines.
- * 
- * That will leave the shared object's ownership in a "claimed" state
- * and cause a deadlock. To prevent a return value discrepancy, we can
- * declare the default return value right after acquiring the lock, and then
- * check for edge cases and allow edge cases to skip the main logic and 
- * immediately return the default return value.
- * 
- * NOTE: Functions that do not directly operate on the shared object DO NOT
- * need to acquire/release the lock on the shared object. This is especially
- * important when a function uses other functions that directly operate on
- * the shared object: if the parent function claimed the lock and becomes
- * blocked before the child function returns, the child function wouldn't be
- * able to acquire the lock and will cause a deadlock.
- * 
- *  pthread_mutex_lock(&(wclist->lock));
- *  pthread_mutex_unlock(&(wclist->lock));
  */
 
 #include "custom_helpers.h"
@@ -83,8 +49,8 @@ FILE** openFiles(int count, char* fileNamePtrs[]) {
   if (fileNamePtrs == NULL || count <=0) return NULL;
 
   /*
-   * zero-out the array, so that if we need to abort and close the files
-   * prematurely, we dont treat garbage values as file pointers.
+   * zero-out the file ptrs, so that if we need to abort and close the
+   * files prematurely, we dont treat garbage values as file pointers.
    */
   FILE **filePtrs = (FILE**) calloc(count, sizeof(FILE*));
   if (filePtrs == NULL) return NULL;
@@ -92,18 +58,18 @@ FILE** openFiles(int count, char* fileNamePtrs[]) {
   FILE* filePtr = NULL;
   char messageBuffer[100];
 
-  for (int fileNameIndex = 0; fileNameIndex < count; fileNameIndex++) {
-    char* fileName = fileNamePtrs[fileNameIndex];
+  for (int index = 0; index < count; index++) {
+    char* fileName = fileNamePtrs[index];
 
-    if((filePtr = fopen(fileName, "r")) == NULL) {
-      sprintf(messageBuffer, "fopen() failed to open file %s.\n", fileName);
+    if ((filePtr = fopen(fileName, "r")) == NULL) {
+      sprintf(messageBuffer, "fopen() failed to open file '%s'", fileName);
       perror(messageBuffer);
 
       closeFiles(count, filePtrs);
       return NULL;
     }
 
-    filePtrs[fileNameIndex] = filePtr;
+    filePtrs[index] = filePtr;
   }
   return filePtrs;
 }
@@ -118,13 +84,14 @@ void cleanUpWordCountList(word_count_list_t* wordCountListPtr) {
    * All threads using the word count list should exit before this function
    * is called, and the caller thread will be the only thread accessing the
    * word count list. This function therefore does not need to obtain the
-   * mutex lock on the word_count_list. If threads were forecefully terminated,
-   * they may have died holding the lock, in which case the lock wouldn't be
-   * obtainable anyway.
+   * mutex lock on the word_count_list. But just in case, this thread also
+   * uses synchronization protection to establish the pattern that all accesses
+   * to shared state must be in critical section.
+   * 
+   * If threads were forcefully terminated, they may have died holding the
+   * lock, in which case the lock wouldn't be obtainable anyway.
    */
-
-  // edge cases
-  if (wordCountListPtr == NULL) return;
+  pthread_mutex_lock(&(wordCountListPtr->lock));
 
   struct list *lst = &(wordCountListPtr->lst);
   struct list_elem *lstElement = list_begin(lst);
@@ -132,20 +99,26 @@ void cleanUpWordCountList(word_count_list_t* wordCountListPtr) {
   // if the list is empty, the execution skip this loop
   while (lstElement != list_end(lst)) {
     /*
-     * first update the pointer to the next list element, because the current
-     * one will be freed at the end of the loop, and we won't be able to find
-     * the next element then.
+     * remove the current element from the list and update the pointer to
+     * the next element; do this before freeing any memory, because the
+     * current element will be freed at the end of the loop, and we won't
+     * be able to find the next element then.
      */
     struct list_elem *currentElement = lstElement;
-    lstElement = list_next(lstElement);
-
-    // remove the current element from the list, then free its host word count
-    currentElement = list_remove(currentElement);
+    lstElement = list_remove(currentElement);
     word_count_t *wordCount = list_entry(currentElement, word_count_t, elem);
     free(wordCount->word);
     free(wordCount);
   }
 
+  pthread_mutex_unlock(&(wordCountListPtr->lock));
+
+  /*
+   * since the word count list should be completely freed, the lock in the list
+   * should shoulalso be desctroyed/disabled.
+   */
+  pthread_mutex_destroy(&(wordCountListPtr->lock));
+  free(wordCountListPtr);
   return;
 }
 
@@ -160,24 +133,35 @@ void joinThreadPool(int numOfThreads, pthread_t *threadPool) {
   if (numOfThreads <= 0 || threadPool == NULL) return;
 
   for (int index = 0; index < numOfThreads; index++) {
+    /* 
+     * if thread has a zero value, then it was never initialized, i.e. no new
+     * therad was ever created and stored in this pthread_t. So skip over it.
+     */
+    pthread_t thread = threadPool[index];
+    if (thread == 0) continue;
+
     /*
      * exitError will contain the exit value of the thread starter routine;
      * in this case it will be an interger
      */
-    int exitError;
-    int joiningError = pthread_join(threadPool[index], (void **)(&exitError));
+    int exitError, joiningError;
+    joiningError = pthread_join(thread, (void **)(&exitError));
 
-    if (joiningError)
-      printf("Failed to wait for thread %d to exit.\n", index);
-
-    if (exitError)
-      printf("Joined with thread %d which exited with status %d.\n", index, exitError);
+    /*
+     * joinThreadPool() can be used to wait for normal executing threads to
+     * exit, or used to wait for signaled threads to exit. In both cases,
+     * the thread could have already exited, in which case pthread_join()
+     * will return ESRCH=3 to indicate that the thread cannot be found
+     */
+    if (joiningError && joiningError != ESRCH)
+      printf("Error %d encountered when joining with thread %d.\n", joiningError, index);
   }
   return;
 }
 
 /**
- * Clean up the thread pool.
+ * Clean up the thread pool. This function should only be called to interrupt
+ * and kill the threads in an abort.
  * 
  * @param numOfThreads The number of threads in the thread pool
  * @param threadPool An array of pthread_t
@@ -188,10 +172,22 @@ void cleanUpThreadPool(int numOfThreads, pthread_t *threadPool) {
   
   // send termination signal to the created threads
   for (int index = 0; index < numOfThreads; index++) {
-    int signallingError = pthread_kill(threadPool[index], SIGTERM);
+    /* 
+     * if thread has a zero value, then it was never initialized, i.e. no new
+     * therad was ever created and stored in this pthread_t. So skip over it.
+     */
+    pthread_t thread = threadPool[index];
+    if (thread == 0) continue;
 
-    if (signallingError)
-      printf("Failed to send SIGTERM to thread %d.\n", index);
+    /* 
+     * since this function is called during the abort, the threads could
+     * be either running or exited-but-not-joined. If the thread has already
+     * exited but isn't joined, pthread_kill() returns ESRCH=3 to indicate
+     * that the thread cannot be found in the list of running threads.
+     */
+    int signalingError = pthread_kill(thread, SIGTERM);
+    if (signalingError && signalingError != ESRCH)
+      printf("Error %d encountered when sending SIGTERM to thread %d.\n", signalingError, index);
   }
 
   /* 
@@ -210,28 +206,37 @@ void cleanUpThreadPool(int numOfThreads, pthread_t *threadPool) {
  * @param threadPool An array of pthread_t
  * @param wordCountList A word count list
  * @param filePtrs An array of FILE*
- * @param argArray An array of count_words_arg_t
+ * @param arguments An array of count_words_arg_t
+ * @param abort Whether this cleaup is an abort in the middle of the program
  */
-void abortWordCount(
+void cleanUp(
   int numOfThreads,
   pthread_t *threadPool,
   word_count_list_t *wordCountList,
   FILE **filePtrs,
-  count_words_arg_t *argArray
+  count_words_arg_t *arguments,
+  bool abort
 ) {
   // edge cases
   if (numOfThreads <= 0) return;
 
-  // terminate the threads first, so that other resources do not have users
-  cleanUpThreadPool(numOfThreads, threadPool);
+  if (abort) {
+    /*
+     * if this is an abort, terminate the threads first, so that other
+     * resources do not have users
+     */
+    cleanUpThreadPool(numOfThreads, threadPool);
+  }
   cleanUpWordCountList(wordCountList);
   closeFiles(numOfThreads, filePtrs);
-  free(argArray);
+  free(arguments);
   return;
 }
 
 /**
- * Extract the next word from the file.
+ * Extract the next word from the file. The file pointer argument is
+ * dedicated to a single thread, so there is no shared data in this
+ * function, and therefore no synchronization primitive is needed.
  * 
  * @param file The input file pointer
  * 
@@ -304,19 +309,26 @@ void *count_words_p(void *arg) {
   word_count_list_t *wclist = argument->wordCountListPtr;
   FILE *inputFile = argument->inputFilePtr;
 
-  char* word;
+  word_count_t *wc;
+  char *word;
 
   while ((word = get_word_p(inputFile)) != NULL) {
     // only count words that are longer than one alphabet
-    if (strlen(word) == 1)
+    if (strlen(word) <= 1) {
       free(word);
-    // if the function failed to add the word to the list
-    else if (add_word(wclist, word) == NULL) {
+      continue;
+    } else {
+      wc = add_word(wclist, word);
       free(word);
-      return (void*) 1;
+      /*
+       * if the function failed to add the word to the list,
+       * exit with error
+       */
+      if (wc == NULL)
+        pthread_exit((void *) 1);
     }
   }
-  return (void*) 0;
+  pthread_exit((void*) 0);
 }
 
 /**
