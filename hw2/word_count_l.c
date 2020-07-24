@@ -1,7 +1,8 @@
 /*
  * Implementation of the word_count interface using Pintos lists.
  *
- * You may modify this file, and are expected to modify it.
+ * You may NOT modify this file. Any changes you make to this file will not
+ * be used when grading your submission.
  */
 
 /*

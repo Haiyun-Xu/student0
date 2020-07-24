@@ -1,0 +1,5 @@
+4.1
+    When run on all 5 files in the Gutenberg dataset (1 trial), the lwords program took 64.938451 seconds, and the pwords program took 56.850432. It is expected that the pwords program finishes faster than the lwords program, because even the pwords program still needs to serialize the threads' access to the word count list, it can at least get words concurrently and save some time there.
+
+4.2
+    Since any access to the word count list needs to be serialized, but accesses to the file pointers do not, pwords will perform better than lwords when there are many input files and when the words are longer. In contrast, lwords does not have the thread creation/joining and synchronization overhead, and so will perform better when there are few input files. At the extreme case where there is only a single input file, the threading and synchronization overhead of pwords will certainly make it slower than lwords, so there is no way to guarantee that pwords always perform better than lwords.
