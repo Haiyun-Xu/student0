@@ -31,6 +31,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "word_count.h"
 #include "word_helpers.h"
@@ -39,7 +40,7 @@
 /*
  * main - handle command line, spawning one thread per file.
  */
-int main(int argc, char *argv[]) {
+int actual_main(int argc, char *argv[]) {
   /* Create the empty data structure. */
   int numOfThreads = 0;
   FILE **filePtrs = NULL;
@@ -102,4 +103,16 @@ int main(int argc, char *argv[]) {
   fprint_words(wordCountListPtr, stdout);
   cleanUp(numOfThreads, threadPool, wordCountListPtr, filePtrs, arguments, false);
   return 0;
+}
+
+/**
+ * This is only a timing wrapper for the actual main function.
+ */
+int main(int argc, char *argv[]) {
+  clock_t begin = clock();
+  int result = actual_main(argc, argv);
+  clock_t end = clock();
+  double duration = (double) (end - begin) / CLOCKS_PER_SEC;
+  printf("The execution time is %.6f seconds.\n", duration);
+  return result;
 }

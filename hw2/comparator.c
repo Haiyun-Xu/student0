@@ -72,7 +72,7 @@ int main(int argc, char* argv[]) {
         resultCount = lineToWordAndCount(resultLine, &resultPtr);
 
         if (strcmp(answerPtr, resultPtr) || answerCount != resultCount) {
-            printf("Mismatch: answer's %s\t\t\tx%d != result's %s\t\t\tx%d.\n", answerPtr, answerCount, resultPtr, resultCount);
+            printf("Mismatch: answer's %s x%d != result's %s x%d.\n", answerPtr, answerCount, resultPtr, resultCount);
             mismatch = true;
         }
 

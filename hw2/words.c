@@ -28,6 +28,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <time.h>
 
 #include "word_count.h"
 #include "word_helpers.h"
@@ -35,7 +36,7 @@
 /*
  * main - handle command line and file handles.
  */
-int main(int argc, char *argv[]) {
+int actual_main(int argc, char *argv[]) {
   /* Create the empty data structure. */
   word_count_list_t word_counts;
   init_words(&word_counts);
@@ -60,4 +61,16 @@ int main(int argc, char *argv[]) {
   wordcount_sort(&word_counts, less_count);
   fprint_words(&word_counts, stdout);
   return 0;
+}
+
+/**
+ * This is only a timing wrapper for the actual main function.
+ */
+int main(int argc, char *argv[]) {
+  clock_t begin = clock();
+  int result = actual_main(argc, argv);
+  clock_t end = clock();
+  double duration = (double) (end - begin) / CLOCKS_PER_SEC;
+  printf("The execution time is %.6f seconds.\n", duration);
+  return result;
 }
