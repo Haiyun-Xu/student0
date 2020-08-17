@@ -1,5 +1,5 @@
 /**
- * This is a simple shell program.
+ * This is a simple shell program that supports built-in commands as well as other programs on the computer.
  * 
  * @author Haiyun Xu <xuhaiyunhenry@gmail.com>
  * @copyright MIT
@@ -26,7 +26,7 @@
 /* Whether the shell is connected to an actual terminal or not. */
 bool shell_is_interactive;
 
-/* File descriptor for the shell input */
+/* File descriptor to use as the shell's input and output file */
 int shell_input;
 int shell_output;
 
@@ -139,6 +139,69 @@ int lookup(char cmd[]) {
 }
 
 /**
+ * Convert the command tokens into program name and arguments.
+ * 
+ * @param programName Address of a pointer to string
+ * @param argList Address of a pointer to a list of strings
+ * @param tokens The tokens struct containing all the command parts
+ * 
+ * @return int Returns 0 if the parsing succeeded, or -1 if failed
+ */
+int parse_program_arguments(char **programName, char ***argList, struct tokens * tokens) {
+  if (programName == NULL|| argList == NULL|| tokens == NULL) {
+    return -1;
+  }
+
+  // extract the name of the program
+  *programName = tokens_get_token(tokens, 0);
+
+  /*
+   * extract each of the program arguments; note that the first argument must
+   * be the program name, and the last argument must be a NULL pointer
+   */
+  size_t argListLength = tokens_get_length(tokens);
+  char **arguments = (char **) malloc((argListLength + 1) * sizeof(char*));
+  for (size_t index = 0; index < argListLength; index++) {
+    arguments[index] = tokens_get_token(tokens, index);
+  }
+  // the argument list must be terminated by a NULL pointer
+  arguments[argListLength] = NULL;
+  *argList = arguments;
+
+  return 0;
+}
+
+/**
+ * Execute non-built-in command by calling other programs, assuming that the
+ * full path of the program is provided.
+ * 
+ * The new program is executed as a new process.
+ */
+int exec_program(struct tokens *tokens) {
+  // extract the program name and all of its arguments
+  char *programName, **argList;
+  parse_program_arguments(&programName, &argList, tokens);
+
+  // fork the current process
+  pid_t processID = fork();
+  if (processID == -1) {
+    perror("Failed to create new process: ");
+    return -1;
+  } else if (processID == 0) {
+    // this is the child process, should exit via code in the new process image
+    execv(programName, argList);
+  }
+
+  // this is the parent process
+  int terminatedProcessID = waitpid(processID, NULL, 0); // wc program doesn't take the argument and so hangs to wait for stdin 
+  if (terminatedProcessID == -1) {
+    perror("Failed to wait for child process to terminate: ");
+    return -1;
+  }
+  return 0;
+}
+
+/**
  * Intialization procedures for this shell.
  */
 void init_shell() {
@@ -193,8 +256,7 @@ int main(unused int argc, unused char *argv[]) {
     if (fundex >= 0) {
       cmd_table[fundex].fun(tokens);
     } else {
-      /* REPLACE this to run commands as programs. */
-      fprintf(stdout, "This shell doesn't know how to run programs.\n");
+      exec_program(tokens);
     }
 
     if (shell_is_interactive)
