@@ -11,37 +11,76 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/types.h>
 #include <signal.h>
-#include <sys/wait.h>
+#include <string.h>
 #include <termios.h>
 #include <unistd.h>
 
 #include "tokenizer.h"
+#include "program_helpers.h"
 
-/* Convenience macro to silence compiler warnings about unused function parameters. */
-#define unused __attribute__((unused))
 
-/* Whether the shell is connected to an actual terminal or not. */
+
+/**
+ * Configurations of the shell
+ */
+// Whether the shell is connected to an actual terminal or not
 bool shell_is_interactive;
 
-/* File descriptor to use as the shell's input and output file */
+// File descriptor to use as the shell's input and output file
 int shell_input;
 int shell_output;
 
-/* Terminal mode settings for the shell */
+// Terminal mode settings for the shell
 struct termios shell_tmodes;
 
-/* Process group id for the shell */
+// Process group id for the shell
 pid_t shell_pgid;
 
-int cmd_exit(struct tokens *tokens);
-int cmd_help(struct tokens *tokens);
-int cmd_pwd(struct tokens *tokens);
-int cmd_cd(struct tokens *tokens);
+/**
+ * Intialization procedures for this shell.
+ */
+void init_shell() {
+  /* Our shell is connected to standard input. */
+  shell_input = STDIN_FILENO;
+  shell_output = STDOUT_FILENO;
 
-/* Built-in command functions take token array (see parse.h) and return int */
+  /* Check if we are running interactively */
+  shell_is_interactive = isatty(shell_input);
+
+  if (shell_is_interactive) {
+    /**
+     * If the shell is not currently in the foreground, we must pause the shell until it becomes a
+     * foreground process. We use SIGTTIN to pause the shell. When the shell gets moved to the
+     * foreground, we'll receive a SIGCONT.
+     * 
+     * We detect whether the shell is in the foreground by checking if the process owning stadin is
+     * the shell process (compare the process group ids). If not, we send to all processes within the
+     * group a SIGTTIN signal (stop terminal input for background process).
+     */
+    while (tcgetpgrp(shell_input) != (shell_pgid = getpgrp()))
+      kill(-shell_pgid, SIGTTIN);
+
+    /* Saves the shell's process id */
+    shell_pgid = getpid();
+
+    /* Take control of the terminal */
+    tcsetpgrp(shell_input, shell_pgid);
+
+    /* Save the current termios to a variable, so it can be restored later. */
+    tcgetattr(shell_input, &shell_tmodes);
+  }
+}
+
+
+
+/**
+ * Built-in commands of this shell
+ */
+// Convenience macro to silence compiler warnings about unused function parameters.
+#define unused __attribute__((unused))
+
+// Built-in command functions take token array (see parse.h) and return int
 typedef int cmd_fun_t(struct tokens *tokens);
 
 /* Built-in command struct and lookup table */
@@ -50,6 +89,11 @@ typedef struct fun_desc {
   char *cmd;
   char *doc;
 } fun_desc_t;
+
+int cmd_help(unused struct tokens *tokens);
+int cmd_exit(unused struct tokens *tokens);
+int cmd_pwd(unused struct tokens *tokens);
+int cmd_cd(struct tokens *tokens);
 
 fun_desc_t cmd_table[] = {
   {cmd_help, "?", "show this help menu"},
@@ -138,104 +182,11 @@ int lookup(char cmd[]) {
   return -1;
 }
 
-/**
- * Convert the command tokens into program name and arguments.
- * 
- * @param programName Address of a pointer to string
- * @param argList Address of a pointer to a list of strings
- * @param tokens The tokens struct containing all the command parts
- * 
- * @return int Returns 0 if the parsing succeeded, or -1 if failed
- */
-int parse_program_arguments(char **programName, char ***argList, struct tokens * tokens) {
-  if (programName == NULL|| argList == NULL|| tokens == NULL) {
-    return -1;
-  }
 
-  // extract the name of the program
-  *programName = tokens_get_token(tokens, 0);
-
-  /*
-   * extract each of the program arguments; note that the first argument must
-   * be the program name, and the last argument must be a NULL pointer
-   */
-  size_t argListLength = tokens_get_length(tokens);
-  char **arguments = (char **) malloc((argListLength + 1) * sizeof(char*));
-  for (size_t index = 0; index < argListLength; index++) {
-    arguments[index] = tokens_get_token(tokens, index);
-  }
-  // the argument list must be terminated by a NULL pointer
-  arguments[argListLength] = NULL;
-  *argList = arguments;
-
-  return 0;
-}
 
 /**
- * Execute non-built-in command by calling other programs, assuming that the
- * full path of the program is provided.
- * 
- * The new program is executed as a new process.
+ * The shell program.
  */
-int exec_program(struct tokens *tokens) {
-  // extract the program name and all of its arguments
-  char *programName, **argList;
-  parse_program_arguments(&programName, &argList, tokens);
-
-  // fork the current process
-  pid_t processID = fork();
-  if (processID == -1) {
-    perror("Failed to create new process: ");
-    return -1;
-  } else if (processID == 0) {
-    // this is the child process, should exit via code in the new process image
-    execv(programName, argList);
-  }
-
-  // this is the parent process
-  int terminatedProcessID = waitpid(processID, NULL, 0); // wc program doesn't take the argument and so hangs to wait for stdin 
-  if (terminatedProcessID == -1) {
-    perror("Failed to wait for child process to terminate: ");
-    return -1;
-  }
-  return 0;
-}
-
-/**
- * Intialization procedures for this shell.
- */
-void init_shell() {
-  /* Our shell is connected to standard input. */
-  shell_input = STDIN_FILENO;
-  shell_output = STDOUT_FILENO;
-
-  /* Check if we are running interactively */
-  shell_is_interactive = isatty(shell_input);
-
-  if (shell_is_interactive) {
-    /**
-     * If the shell is not currently in the foreground, we must pause the shell until it becomes a
-     * foreground process. We use SIGTTIN to pause the shell. When the shell gets moved to the
-     * foreground, we'll receive a SIGCONT.
-     * 
-     * We detect whether the shell is in the foreground by checking if the process owning stadin is
-     * the shell process (compare the process group ids). If not, we send to all processes within the
-     * group a SIGTTIN signal (stop terminal input for background process).
-     */
-    while (tcgetpgrp(shell_input) != (shell_pgid = getpgrp()))
-      kill(-shell_pgid, SIGTTIN);
-
-    /* Saves the shell's process id */
-    shell_pgid = getpid();
-
-    /* Take control of the terminal */
-    tcsetpgrp(shell_input, shell_pgid);
-
-    /* Save the current termios to a variable, so it can be restored later. */
-    tcgetattr(shell_input, &shell_tmodes);
-  }
-}
-
 int main(unused int argc, unused char *argv[]) {
   init_shell();
 
