@@ -8,6 +8,7 @@
 #ifndef PROGRAM_HELPERS_H
 #define PROGRAM_HELPERS_H
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +41,17 @@ char *duplicate_string(const char *string);
 char *concatenate_strings(const char *prefix, const char *suffix);
 
 /**
+ * Join the strings together in the given order, separated by the separator.
+ * Caller should own the heap memory and free it.
+ * 
+ * @param strings An array of strings, terminated by a NULL pointer
+ * @param separator The character used to separate the strings
+ * 
+ * @return char* The joined string
+ */
+char *join_strings(char *const *strings, const char separator);
+
+/**
  * Checks whether the file is executable.
  * 
  * @param filePath The full path of the file
@@ -49,45 +61,58 @@ char *concatenate_strings(const char *prefix, const char *suffix);
 int is_file_executable(const char* filePath);
 
 /**
+ * Return the program's name.
+ * 
+ * @param tokens The list of command arguments
+ * 
+ * @return char* The program name in string
+ */
+char *get_program_name(struct tokens *tokens);
+
+/**
  * Return the program's full path on the heap.
  * Caller should own the heap memory and free it.
  * 
+ * @param tokens The list of command arguments
  * @param programName The name of the program
  * 
- * @return char* Pointer to the full path of the program, or NULL if it can't be found
+ * @return int Returns 0 if successful, or -1 if failed
  */
-char *get_program_full_path(char *programName);
-
-/**
- * Get the program name from the command.
- * The returned string is not newly-allocated.
- * 
- * @param programName The address of a pointer to string
- * @param tokens The tokens struct containing all the command parts
- * 
- * @return int Returns 0 if the parsing succeeded, or -1 if failed
- */
-int get_program_name(char **programName, struct tokens *tokens);
+int get_program_full_path(struct tokens *tokens, char **programFullPath);
 
 /**
  * Get the program arguments from the command.
  * The program arguments are not newly-allocated, but the pointer array to the program arguments is.
  * Caller should own the heap memory and free it.
  * 
- * @param argList The address of a pointer to a list of strings
  * @param tokens The tokens struct containing all the command parts
+ * @param argList The address of a pointer to a list of strings
  * 
  * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int get_program_arguments(char ***argList, struct tokens *tokens);
+int get_program_arguments(struct tokens *tokens, char ***argList);
 
 /**
- * Execute non built-in programs as a new process.
+ * Interpret command arguments of program call, and resolve the program full
+ * path and the list of program parameters.
+ * Caller should own the heap memory and free it.
  * 
- * @param tokens The tokens struct containing all the command parts
+ * @param tokens The list of command arguments
+ * @param programFullPath Address of a string, where the program full path will be stored
+ * @param programArgList Address of an array of strings, where the program call arguments will be stored
  * 
  * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int exec_program(struct tokens *tokens);
+int interpret_command_arguments(struct tokens *tokens, char **programFullPath, char ***programArgList);
+
+/**
+ * Execute the given program with the given arguments.
+ * 
+ * @param programFullPath The full path to the program executable
+ * @param programArgList The list of program arguments
+ * 
+ * @return int Returns 0 if the program executed successfully, or -1 otherwise
+ */
+int execute_program(const char *programFullPath, char *const *programArgList);
 
 #endif /* PROGRAM_HELPERS_H */

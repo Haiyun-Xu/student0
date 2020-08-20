@@ -18,6 +18,7 @@
 
 #include "tokenizer.h"
 #include "program_helpers.h"
+#include "program_redirection.h"
 
 
 
@@ -185,38 +186,96 @@ int lookup(char cmd[]) {
 
 
 /**
+ * Interpret and run the command line arguments.
+ * 
+ * @param tokens The list of command arguments
+ * 
+ * @return int Returns 0 if the command line ran successfully, or -1 otherwise
+ */
+int execute_commandline(struct tokens *tokens) {
+  // edge cases
+  if (tokens == NULL)
+    return -1;
+
+  /*
+   * check the command line syntax, and execute it in different mode based on
+   * its syntax: input/output redirect, piping, and command/program call
+   */
+  if (contains_redirection(tokens)) {
+    // extract the program call tokens
+    struct tokens *programCallTokens = NULL;
+    get_redirection_program_call(tokens, &programCallTokens); /** TODO: remember to free this */
+    
+    // parse the tokens to get the program full path and argument list
+    char *programFullPath = NULL, **programArgList = NULL;
+    interpret_command_arguments(programCallTokens, &programFullPath, &programArgList); /** TODO: remember to free this */
+    if (programFullPath == NULL) {
+      fprintf(stderr, "Failed to find program executable\n");
+      tokens_destroy(programCallTokens);
+      return -1;
+    }
+
+    // extract the program redirection file name
+    char *redirectionFileName = NULL;
+    int redirectionType = get_redirection_file_name(tokens, &redirectionFileName);
+
+    // run the program executable with input/output redirection
+    int exitStatus = execute_program_redirected(programFullPath, programArgList, redirectionType, redirectionFileName);
+    
+    tokens_destroy(programCallTokens);
+    free(programFullPath);
+    free(programArgList);
+    return exitStatus;
+  }
+
+  /*
+   * no special syntax, so either find and run the requested built-in
+   * command, or run an external program;
+   */
+  int commandIndex = lookup(tokens_get_token(tokens, 0));
+  if (commandIndex >= 0) {
+    return cmd_table[commandIndex].fun(tokens);
+  } else {
+    char *programFullPath = NULL, **programArgList = NULL;
+    interpret_command_arguments(tokens, &programFullPath, &programArgList); /** TODO: remember to free this */
+    if (programFullPath == NULL) {
+      fprintf(stderr, "Failed to find program executable\n");
+      return -1;
+    }
+
+    // run the program executable
+    int exitStatus = execute_program(programFullPath, programArgList);
+
+    free(programFullPath);
+    free(programArgList);
+    return exitStatus;
+  }
+}
+
+/**
  * The shell program.
  */
 int main(unused int argc, unused char *argv[]) {
   init_shell();
 
   static char line[4096];
+  struct tokens *tokens = NULL;
   int line_num = 0;
 
-  /* Please only print shell prompts when standard input is not a tty */
-  if (shell_is_interactive)
-    fprintf(stdout, "%d: ", line_num);
-
-  while (fgets(line, 4096, stdin)) {
-    /* Split our line into words. */
-    struct tokens *tokens = tokenize(line);
-
-    /* Find which built-in function to run. */
-    int fundex = lookup(tokens_get_token(tokens, 0));
-
-    if (fundex >= 0) {
-      cmd_table[fundex].fun(tokens);
-    } else {
-      exec_program(tokens);
-    }
-
+  // the loop should never terminate, unless the exit() command is executed
+  while (true) {
+    // only print shell prompts when standard input is not a tty
     if (shell_is_interactive)
-      /* Please only print shell prompts when standard input is not a tty */
-      fprintf(stdout, "%d: ", ++line_num);
+      fprintf(stdout, "%d: ", line_num++);
 
-    /* Clean up memory */
+    // reads the command line, split it into arguments, then run it
+    fgets(line, 4096, stdin);
+    tokens = tokenize(line);
+    execute_commandline(tokens);
+
+    // clean up memory
     tokens_destroy(tokens);
   }
-
+  // this should never be reached
   return 0;
 }
