@@ -8,7 +8,7 @@
 #include "program_redirection.h"
 
 /**
- * Checks whether the given argument is the redirection symbol.
+ * Checks whether the given argument is the redirect symbol.
  * 
  * @param argument An argument string
  * 
@@ -16,7 +16,8 @@
  *             returns 1 if it's an output redirection symbol, and 0 if
  *             not a redirection symbol
  */
-int is_redirection_symbol(const char* argument) {
+int is_redirect_symbol(const char* argument) {
+  // edge cases
   if (argument == NULL)
     return 0;
 
@@ -33,7 +34,7 @@ int is_redirection_symbol(const char* argument) {
  * Checks whether the command line contains input/output redirection.
  * Redirection is always of the form "[prgram] > [file]" or "[prgram] < [file]".
  * 
- * @param tokens The list of command arguments
+ * @param tokens The list of command tokens
  * 
  * @return int Returns -1/1 if there's input/output redirection, or 0 if no redirection
  */
@@ -48,7 +49,7 @@ int contains_redirection(struct tokens *tokens) {
   for (size_t index = 0; index < tokensLength; index++) {
     // iterate through the command arguments and check if any of them is a redirection symbol
     argument = tokens_get_token(tokens, index);
-    if ((redirection = is_redirection_symbol(argument))) {
+    if ((redirection = is_redirect_symbol(argument))) {
       return redirection;
     }
   }
@@ -56,125 +57,204 @@ int contains_redirection(struct tokens *tokens) {
 }
 
 /**
- * Get the redirected program call from the command.
- * The returned token struct is newly-allocated, and the
- * caller should own the heap memory and free it.
+ * Return the redirection file name from the command tokens. The returned
+ * string is not newly-allocated.
  * 
- * @param tokens The list of command arguments
- * @param programCallTokens Address of a pointer to the list of program call arguments
+ * @param tokens The list of command tokens
+ * @param fileNamePtr The address of the file name
  * 
  * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int get_redirection_program_call(struct tokens *tokens, struct tokens **programCallTokens) {
+int get_redirection_file_name(struct tokens *tokens, char **fileNamePtr) {
   // edge cases
-  if (tokens == NULL || programCallTokens == NULL) {
-    *programCallTokens = NULL;
+  if (tokens == NULL || fileNamePtr == NULL) {
+    *fileNamePtr = NULL;
     return -1;
   }
   
-  /*
-   * iterate through the original tokens, and extract the arguments that belong
-   * to the program call; the number of program call arguments must be less
-   * than the total number of command line arguments
-   */
-  char *argument = NULL;
-  size_t tokenLength = tokens_get_length(tokens);
-  char **programCallArguments = (char**) malloc(tokenLength * sizeof(char*)); /** TODO: remember to free this */
-  if (programCallArguments == NULL) {
-    fprintf(stderr, "Failed to allocate memory\n");
-    *programCallTokens = NULL;
+  char *token = NULL;
+  bool redirectionEncountered = false;
+  size_t tokensLength = tokens_get_length(tokens);
+  for (size_t index = 0; index < tokensLength; index++) {
+    // iterate through the command arguments, until a redirection symbol is found
+    token = tokens_get_token(tokens, index);
+    if (is_redirect_symbol(token)) {
+      redirectionEncountered = true;
+    } else if (redirectionEncountered) {
+      // in valid syntax, the file always follows the redirection symbol
+      *fileNamePtr = token;
+      return 0;
+    }
+  }
+  // no redirection symbol was found, so no file name extracted
+  return -1;
+}
+
+/**
+ * Return the redirected program name from the command tokens. The returned
+ * string is not newly-allocated.
+ * 
+ * @param tokens The list of command tokens
+ * @param programNamePtr The address of the program name
+ * 
+ * @return int Returns 0 if the parsing succeeded, or -1 if failed
+ */
+int get_redirected_program_name(struct tokens *tokens, char **programNamePtr) {
+  // edge cases
+  if (tokens == NULL || programNamePtr == NULL) {
+    *programNamePtr = NULL;
     return -1;
   }
 
-  for (size_t index = 0; index < tokenLength; index++) {
-    /*
-     * if the current argument is a redirection symbol, terminate the array
-     * with a NULL pointer; otherwise, append the argument to the list of
-     * program call arguments
-     */
-    argument = tokens_get_token(tokens, index);
-    if (is_redirection_symbol(argument)) {
-      programCallArguments[index] = NULL;
+  // in valid syntax, the first token should be the program name
+  *programNamePtr = tokens_get_token(tokens, 0);
+  return 0;
+}
+
+/**
+ * Return the program arguments from the command tokens in a Null terminated
+ * argument list. The returned arguments are not newly-allocated, but the
+ * argument list is.
+ * 
+ * The caller should own the heap memory and free it.
+ * 
+ * @param tokens The list of command tokens
+ * @param argListPtr Address of a pointer to the list of program call arguments
+ * 
+ * @return int Returns 0 if the parsing succeeded, or -1 if failed
+ */
+int get_redirected_program_argument(struct tokens *tokens, char ***argListPtr) {
+  // edge cases
+  if (tokens == NULL || argListPtr == NULL) {
+    *argListPtr = NULL;
+    return -1;
+  }
+  
+  // count the number of program arguments in the command tokens
+  size_t tokensLength = tokens_get_length(tokens);
+  int argListLength = 0;
+  char *token = NULL;
+  for (size_t index = 0; index < tokensLength; index++) {
+    token = tokens_get_token(tokens, index);
+    if (is_redirect_symbol(token)) {
       break;
     } else {
-      programCallArguments[index] = argument;
+      argListLength ++;
     }
   }
 
-  // join the program call arguments by space, and retokenize the program call
-  char *programCall = join_strings(programCallArguments, ' '); /** TODO: remember to free this */
-  free(programCallArguments);
-  *programCallTokens = tokenize(programCall);
-  free(programCall);
+  // allocate memory for argument list
+  char **argList = (char **) malloc((argListLength + 1) * sizeof(char *)); /** TODO: remember to free this */
+  if (argList == NULL) {
+    perror("Failed to allocate memory: ");
+    return -1;
+  }
+  // the argument list is terminated by NULL;
+  argList[argListLength] = NULL;
+
+  // extract all argument tokens into the argument list
+  for (int index = 0; index < argListLength; index++) {
+    argList[index] = tokens_get_token(tokens, index);
+  }
+
+  *argListPtr = argList;
+  return 0;
+}
+
+/**
+ * Parse the command tokens into a program name, an argument list, and a
+ * redirection file name. The returned program name, arguments, and file
+ * name are not newly-allocated, but the argument list is.
+ * 
+ * The caller should own the heap memory and free it.
+ * 
+ * @param tokens The command tokens
+ * @param programNamePtr The address of the program name
+ * @param argListPtr The address of the argument list
+ * @param fileNamePtr The address of the redirection file name
+ * 
+ * @return int Returns 0 if the parsing succeeded, or -1 if failed
+ */
+int parse_redirection_tokens(struct tokens *tokens, char **programNamePtr, char ***argListPtr, char **fileNamePtr) {
+  // edge cases
+  if (tokens == NULL || programNamePtr == NULL || argListPtr == NULL || fileNamePtr == NULL) {
+    *programNamePtr = NULL;
+    *argListPtr = NULL;
+    *fileNamePtr = NULL;
+    return -1;
+  }
+
+  /* 
+   * parse and extract the redirected program's name and arguments, as well as
+   * the redirection file's name
+   */
+  int result = 0;
+  result = get_redirection_file_name(tokens, fileNamePtr);
+  result = result | get_redirected_program_name(tokens, programNamePtr);
+  if (result != 0) {
+    *programNamePtr = NULL;
+    *argListPtr = NULL;
+    *fileNamePtr = NULL;
+    return -1;
+  }
+
+  result = get_redirected_program_argument(tokens, argListPtr);
+  if (result != 0) {
+    *programNamePtr = NULL;
+    *argListPtr = NULL;
+    *fileNamePtr = NULL;
+    return -1;
+  }
 
   return 0;
 }
 
 /**
- * Get the redirect file name from the command.
- * The returned string is not newly-allocated.
+ * Execute the given program with the given arguments, accounting for the
+ * redirection options.
  * 
- * @param tokens The list of command arguments
- * @param fileName Address of a pointer to the filename
+ * Takes the ownership of argument list and frees it.
  * 
- * @return int Returns -1/1 if there's input/output redirection, or 0 if no redirection
- */
-int get_redirection_file_name(struct tokens *tokens, char **fileName) {
-  // edge cases
-  if (tokens == NULL || fileName == NULL) {
-    *fileName = NULL;
-    return 0;
-  }
-  
-  char *argument = NULL;
-  int redirection = 0;
-  size_t tokensLength = tokens_get_length(tokens);
-  for (size_t index = 0; index < tokensLength; index++) {
-
-    // iterate through the command arguments, until a redirection symbol is found
-    argument = tokens_get_token(tokens, index);
-    if ((redirection = is_redirection_symbol(argument))) {
-      // in valid syntax, the file always follows the redirection symbol
-      *fileName = tokens_get_token(tokens, index + 1);
-      return redirection;
-    }
-  }
-  return redirection;
-}
-
-/**
- * Execute the given program with the given arguments, accounting for the redirection options.
- * 
- * @param programFullPath The full path to the program executable
- * @param programArgList The list of program arguments
+ * @param programName The program name
+ * @param programArgList The list of program arguments; will be freed by this function
  * @param redirectionType The redirection type: -1 for input redirect, 1 for
  *                        output redirect, and 0 for no redirect
  * @param redurectionFileName The redirection file name
  * 
  * @return int Returns 0 if the program executed successfully, or -1 otherwise
  */
-int execute_program_redirected(const char *programFullPath, char *const *programArgList, int redirectionType, const char *redirectionFileName) {
+int execute_redirected_program(const char *programName, char **programArgList, int redirectionType, const char *redirectionFileName) {
   // edge cases
-  if (programFullPath == NULL || programArgList == NULL) {
+  if (programName == NULL || programArgList == NULL) {
     return -1;
   }
   if (redirectionType && redirectionFileName == NULL) {
     fprintf(stderr, "Redirecting input/out without valid file name\n");
+    free(programArgList);
     return -1;
   }
   const int INPUT_REDIRECTION = -1;
   const int OUTPUT_REDIRECTION = 1;
 
+  char *programFullPath = resolve_executable_full_path(programName); /** TODO: remember to free this */
+  if (programFullPath == NULL) {
+    fprintf(stderr, "No such executable program\n");
+    free(programArgList);
+    return -1;
+  }
+
   // execute the program as a child process
   pid_t processID = fork();
   if (processID == -1) {
     perror("Failed to create new process: ");
+    free(programFullPath);
+    free(programArgList);
     return -1;
   } else if (processID == 0) {
     /*
       * this is the child process, and it should be run with stdin/stdout
-      * redirection if the redirection option was specified. The child process
-      * should exit via the new process image, so there's no need to return
+      * redirection. The child process should exit via the new process image,
+      * so there's no need to return
       */
     // open the redirection file
     int redirectionFileDescriptor = -1;
@@ -213,13 +293,14 @@ int execute_program_redirected(const char *programFullPath, char *const *program
     if (redirectionResult == -1) {
       fprintf(stderr, "Failed to overwrite input/output\n");
       perror("Input/output redirection failed: ");
+      // not freeing the heap memory for the same reason as explained above
       exit(1);
     } else {
       close(redirectionFileDescriptor);
     }
 
-    // with or without redirect, execute the requested program
-    execv(programFullPath, programArgList);
+    // execute the requested program with I/O redirection
+    execv(programFullPath, (char *const *) programArgList);
   }
 
   /*
@@ -229,8 +310,12 @@ int execute_program_redirected(const char *programFullPath, char *const *program
   int terminatedProcessID = waitpid(processID, NULL, 0);
   if (terminatedProcessID == -1) {
     perror("Failed to wait for child process to terminate: ");
+    free(programFullPath);
+    free(programArgList);
     return -1;
   }
   
+  free(programFullPath);
+  free(programArgList);
   return 0;
 }

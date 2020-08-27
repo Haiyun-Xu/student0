@@ -17,8 +17,9 @@
 #include <unistd.h>
 
 #include "tokenizer.h"
-#include "program_helpers.h"
+#include "program.h"
 #include "program_redirection.h"
+#include "program_piping.h"
 
 
 
@@ -201,53 +202,41 @@ int execute_commandline(struct tokens *tokens) {
    * check the command line syntax, and execute it in different mode based on
    * its syntax: input/output redirect, piping, and command/program call
    */
-  if (contains_redirection(tokens)) {
-    // extract the program call tokens
-    struct tokens *programCallTokens = NULL;
-    get_redirection_program_call(tokens, &programCallTokens); /** TODO: remember to free this */
-    
-    // parse the tokens to get the program full path and argument list
-    char *programFullPath = NULL, **programArgList = NULL;
-    interpret_command_arguments(programCallTokens, &programFullPath, &programArgList); /** TODO: remember to free this */
-    if (programFullPath == NULL) {
-      fprintf(stderr, "Failed to find program executable\n");
-      tokens_destroy(programCallTokens);
+  int syntax = 0;
+  if ((syntax = contains_redirection(tokens))) {
+    // extract the program name, program arguments, and redirection file name
+    char *programName = NULL, **argList = NULL, *fileName = NULL;
+    int result = parse_redirection_tokens(tokens, &programName, &argList, &fileName);
+    if (result != 0) {
+      fprintf(stderr, "Failed to parse program name and arguments from command line\n");
       return -1;
     }
 
-    // extract the program redirection file name
-    char *redirectionFileName = NULL;
-    int redirectionType = get_redirection_file_name(tokens, &redirectionFileName);
-
-    // run the program executable with input/output redirection
-    int exitStatus = execute_program_redirected(programFullPath, programArgList, redirectionType, redirectionFileName);
-    
-    tokens_destroy(programCallTokens);
-    free(programFullPath);
-    free(programArgList);
+    // execute the redirected program
+    int exitStatus = execute_redirected_program(programName, argList, syntax, fileName);
     return exitStatus;
+  } else if (contains_piping(tokens)) {
+    /** TODO: place holder */
   }
 
   /*
-   * no special syntax, so either find and run the requested built-in
-   * command, or run an external program;
+   * if the command line has no special syntax, then either find and run the
+   * built-in command, or run the program;
    */
-  int commandIndex = lookup(tokens_get_token(tokens, 0));
+  int commandIndex = lookup(get_program_name(tokens));
   if (commandIndex >= 0) {
     return cmd_table[commandIndex].fun(tokens);
   } else {
-    char *programFullPath = NULL, **programArgList = NULL;
-    interpret_command_arguments(tokens, &programFullPath, &programArgList); /** TODO: remember to free this */
-    if (programFullPath == NULL) {
-      fprintf(stderr, "Failed to find program executable\n");
+    // extract the program name and arguments
+    char *programName = NULL, **argList = NULL;
+    int result = parse_tokens(tokens, &programName, &argList);
+    if (result != 0) {
+      fprintf(stderr, "Failed to parse program name and arguments from command line\n");
       return -1;
     }
 
-    // run the program executable
-    int exitStatus = execute_program(programFullPath, programArgList);
-
-    free(programFullPath);
-    free(programArgList);
+    // execute the program
+    int exitStatus = execute_program(programName, argList);
     return exitStatus;
   }
 }

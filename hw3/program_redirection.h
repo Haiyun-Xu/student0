@@ -9,20 +9,19 @@
 #define PROGRAM_REDIRECTION_H
 
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "helpers.h"
 #include "tokenizer.h"
-#include "program_helpers.h"
 
 
 /**
- * Checks whether the given argument is the redirection symbol.
+ * Checks whether the given argument is the redirect symbol.
  * 
  * @param argument An argument string
  * 
@@ -30,52 +29,84 @@
  *             returns 1 if it's an output redirection symbol, and 0 if
  *             not a redirection symbol
  */
-int is_redirection_symbol(const char* argument);
+int is_redirect_symbol(const char* argument);
 
 /**
  * Checks whether the command line contains input/output redirection.
  * Redirection is always of the form "[prgram] > [file]" or "[prgram] < [file]".
  * 
- * @param tokens The list of command arguments
+ * @param tokens The list of command tokens
  * 
  * @return int Returns -1/1 if there's input/output redirection, or 0 if no redirection
  */
 int contains_redirection(struct tokens *tokens);
 
 /**
- * Get the redirected program call from the command.
- * The returned token struct is newly-allocated, and the
- * caller should own the heap memory and free it.
+ * Return the redirection file name from the command tokens. The returned
+ * string is not newly-allocated.
  * 
- * @param tokens The list of command arguments
- * @param programCallTokens Address of a pointer to the list of program call arguments
+ * @param tokens The list of command tokens
+ * @param fileNamePtr The address of the file name
  * 
  * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int get_redirection_program_call(struct tokens *tokens, struct tokens **programCallTokens);
+int get_redirection_file_name(struct tokens *tokens, char **fileNamePtr);
 
 /**
- * Get the redirect file name from the command.
- * The returned string is not newly-allocated.
+ * Return the redirected program name from the command tokens. The returned
+ * string is not newly-allocated.
  * 
- * @param tokens The list of command arguments
- * @param fileName Address of a pointer to the filename
+ * @param tokens The list of command tokens
+ * @param programNamePtr The address of the program name
  * 
- * @return int Returns -1/1 if there's input/output redirection, or 0 if no redirection
+ * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int get_redirection_file_name(struct tokens *tokens, char **fileName);
+int get_redirected_program_name(struct tokens *tokens, char **programNamePtr);
 
 /**
- * Execute the given program with the given arguments, accounting for the redirection options.
+ * Return the program arguments from the command tokens in a Null terminated
+ * argument list. The returned arguments are not newly-allocated, but the
+ * argument list is.
  * 
- * @param programFullPath The full path to the program executable
- * @param programArgList The list of program arguments
+ * The caller should own the heap memory and free it.
+ * 
+ * @param tokens The list of command tokens
+ * @param argListPtr Address of a pointer to the list of program call arguments
+ * 
+ * @return int Returns 0 if the parsing succeeded, or -1 if failed
+ */
+int get_redirected_program_argument(struct tokens *tokens, char ***argListPtr);
+
+/**
+ * Parse the command tokens into a program name, an argument list, and a
+ * redirection file name. The returned program name, arguments, and file
+ * name are not newly-allocated, but the argument list is.
+ * 
+ * The caller should own the heap memory and free it.
+ * 
+ * @param tokens The command tokens
+ * @param programNamePtr The address of the program name
+ * @param argListPtr The address of the argument list
+ * @param fileNamePtr The address of the redirection file name
+ * 
+ * @return int Returns 0 if the parsing succeeded, or -1 if failed
+ */
+int parse_redirection_tokens(struct tokens *tokens, char **programNamePtr, char ***argListPtr, char **fileNamePtr);
+
+/**
+ * Execute the given program with the given arguments, accounting for the
+ * redirection options.
+ * 
+ * Takes the ownership of argument list and frees it.
+ * 
+ * @param programName The program name
+ * @param programArgList The list of program arguments; will be freed by this function
  * @param redirectionType The redirection type: -1 for input redirect, 1 for
  *                        output redirect, and 0 for no redirect
  * @param redurectionFileName The redirection file name
  * 
  * @return int Returns 0 if the program executed successfully, or -1 otherwise
  */
-int execute_program_redirected(const char *programFullPath, char *const *programArgList, int redirectionType, const char *redirectionFileName);
+int execute_redirected_program(const char *programName, char **programArgList, int redirectionType, const char *redirectionFileName);
 
 #endif /* PROGRAM_REDIRECTION_H */
