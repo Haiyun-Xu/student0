@@ -216,7 +216,17 @@ int execute_commandline(struct tokens *tokens) {
     int exitStatus = execute_redirected_program(programName, argList, syntax, fileName);
     return exitStatus;
   } else if (contains_piping(tokens)) {
-    /** TODO: place holder */
+    // extract the program names amd program argument lists
+    char **programNames = NULL, ***argLists = NULL;
+    int result = parse_piping_tokens(tokens, &programNames, &argLists);
+    if (result != 0) {
+      fprintf(stderr, "Failed to parse program name and arguments from command line\n");
+      return -1;
+    }
+
+    // execute the piped program
+    int exitStatus = execute_piped_program((const char **) programNames, (const char ***) argLists);
+    return exitStatus;
   }
 
   /*

@@ -236,6 +236,7 @@ int execute_redirected_program(const char *programName, char **programArgList, i
   const int INPUT_REDIRECTION = -1;
   const int OUTPUT_REDIRECTION = 1;
 
+  // resolve the full path of the program executable
   char *programFullPath = resolve_executable_full_path(programName); /** TODO: remember to free this */
   if (programFullPath == NULL) {
     fprintf(stderr, "No such executable program\n");
