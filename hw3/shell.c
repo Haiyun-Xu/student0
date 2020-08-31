@@ -27,54 +27,98 @@
  * Configurations of the shell
  */
 // Whether the shell is connected to an actual terminal or not
-bool shell_is_interactive;
+bool shellIsInteractive;
 
 // File descriptor to use as the shell's input and output file
-int shell_input;
-int shell_output;
+int shellInputFileNum;
+int shellOutputFileNum;
 
 // Terminal mode settings for the shell
 struct termios shell_tmodes;
 
-// Process group id for the shell
-pid_t shell_pgid;
+// the shell's process group ID, and the terminal's foreground process group ID
+pid_t shellProcessGroupID;
+pid_t terminalForegroundProcessGroupID;
 
 /**
  * Intialization procedures for this shell.
  */
 void init_shell() {
-  /* Our shell is connected to standard input. */
-  shell_input = STDIN_FILENO;
-  shell_output = STDOUT_FILENO;
+  // The shell should use stdin/stdout as the I/O file descriptors.
+  shellInputFileNum = STDIN_FILENO;
+  shellOutputFileNum = STDOUT_FILENO;
 
-  /* Check if we are running interactively */
-  shell_is_interactive = isatty(shell_input);
+  /*
+   * Check if the shell is running interactively, i.e. if the input file
+   * descriptor is an opened terminal descriptor
+   */
+  shellIsInteractive = isatty(shellInputFileNum);
 
-  if (shell_is_interactive) {
-    /**
-     * If the shell is not currently in the foreground, we must pause the shell until it becomes a
-     * foreground process. We use SIGTTIN to pause the shell. When the shell gets moved to the
-     * foreground, we'll receive a SIGCONT.
+  /*
+   * If the shell is using the terminal as its input file descriptor, then
+   * the shell process must be in the foreground process group of the terminal
+   * descriptor; otherwise it will not be able to read from the terminal
+   * and will be stopped by the SIGTTIN signal 
+   */
+  if (shellIsInteractive) {
+    /*
+     * If the shell process is currently not in the foreground process group,
+     * it will not be able to use the terminal, and so must pause its
+     * execution and wait for its turn.
      * 
-     * We detect whether the shell is in the foreground by checking if the process owning stadin is
-     * the shell process (compare the process group ids). If not, we send to all processes within the
-     * group a SIGTTIN signal (stop terminal input for background process).
+     * We detect whether the shell is in the foreground by checking the ID
+     * of the foreground process group associated with the terminal. And we
+     * pause the shell's execution by putting its process group into the
+     * background via a SIGTTIN signal.
+     * 
+     * When the shell process group gets promoted to the foreground process
+     * group, it will receive a SIGCONT and can continue to execute
      */
-    while (tcgetpgrp(shell_input) != (shell_pgid = getpgrp()))
-      kill(-shell_pgid, SIGTTIN);
+    do {
+      shellProcessGroupID = getpgrp();
+      int foregroundProcessGroupID = tcgetpgrp(shellInputFileNum);
+      if (shellProcessGroupID != foregroundProcessGroupID) {
+        // put all processes in the shell's process group into the background
+        kill(-shellProcessGroupID, SIGTTIN);
+      } else {
+        break;
+      }
+    } while (true);
 
-    /* Saves the shell's process id */
-    shell_pgid = getpid();
+    /*
+     * the shell's process group should now be the foreground process group
+     * of the terminal, so make the shell process the foreground process?
+     */
+    shellProcessGroupID = getpid();
+    tcsetpgrp(shellInputFileNum, shellProcessGroupID);
 
-    /* Take control of the terminal */
-    tcsetpgrp(shell_input, shell_pgid);
-
-    /* Save the current termios to a variable, so it can be restored later. */
-    tcgetattr(shell_input, &shell_tmodes);
+    // Save the current termios to a variable, so it can be restored later.
+    tcgetattr(shellInputFileNum, &shell_tmodes);
   }
 }
 
-
+/**
+ * TODO: what are the expectations on the shell?
+ * 1) the shell is not affected by any of the listed signals. If a
+ *    oreground process group exists, the signal should be sent to
+ *    the entire foreground process group;
+ *  a) the shell must be registered with handlers that ignore the listed
+ *     signals, so that even when there is no subprocesses, the shell is
+ *     not affected by the signals;
+ *  b) the shell must set the latest subprocess group as the foreground
+ *     process of the TTY, so that signals can be sent directly to the
+ *     subprocesses, without affecting the shell;
+ *  c) does the exec() syscall changes the signal handlers of a process?
+ *     If not, the subprocesses must de-register the handlers that they
+ *     inherit from the shell process, so that they cannot ignore the
+ *     signal like the shell and do not cause loops in trying to send the
+ *     signal to the foreground process group;
+ * 2) processes from each new program/pipeline should be put in their own
+ *    process group;
+ *  a) processes on the same commandline/pipeline will be placed in the
+ *     same process group, which is named after the first process of that
+ *     group;
+ */
 
 /**
  * Built-in commands of this shell
@@ -144,8 +188,8 @@ int cmd_pwd(unused struct tokens *tokens) {
   size_t bytesWritten = 0, pathNameLength = strlen(cwdPathName);
   char newline = '\n';
   while (bytesWritten < pathNameLength)
-    bytesWritten += write(shell_output, (void *)(cwdPathName + bytesWritten), (pathNameLength - bytesWritten));
-  write(shell_output, (void *)&newline, 1);
+    bytesWritten += write(shellOutputFileNum, (void *)(cwdPathName + bytesWritten), (pathNameLength - bytesWritten));
+  write(shellOutputFileNum, (void *)&newline, 1);
 
   free(cwdPathName);
   return 0;
@@ -264,7 +308,7 @@ int main(unused int argc, unused char *argv[]) {
   // the loop should never terminate, unless the exit() command is executed
   while (true) {
     // only print shell prompts when standard input is not a tty
-    if (shell_is_interactive)
+    if (shellIsInteractive)
       fprintf(stdout, "%d: ", line_num++);
 
     // reads the command line, split it into arguments, then run it
