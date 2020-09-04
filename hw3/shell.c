@@ -13,15 +13,16 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <string.h>
+#include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
 
 #include "tokenizer.h"
+#include "shell_signal.h"
 #include "program.h"
-#include "program_redirection.h"
 #include "program_piping.h"
-
-
+#include "program_redirection.h"
+#include "process_management.h"
 
 /**
  * Configurations of the shell
@@ -41,16 +42,19 @@ pid_t shellProcessGroupID;
 pid_t terminalForegroundProcessGroupID;
 
 /**
- * Intialization procedures for this shell.
+ * Intialize the shell process. This includes setting the shell process group
+ * as the foreground, and setting up the signal handlers.
+ * 
+ * @return void
  */
-void init_shell() {
+void initialize_shell() {
   // The shell should use stdin/stdout as the I/O file descriptors.
   shellInputFileNum = STDIN_FILENO;
   shellOutputFileNum = STDOUT_FILENO;
 
   /*
    * Check if the shell is running interactively, i.e. if the input file
-   * descriptor is an opened terminal descriptor
+   * descriptor is an open, terminal descriptor
    */
   shellIsInteractive = isatty(shellInputFileNum);
 
@@ -78,7 +82,7 @@ void init_shell() {
       shellProcessGroupID = getpgrp();
       int foregroundProcessGroupID = tcgetpgrp(shellInputFileNum);
       if (shellProcessGroupID != foregroundProcessGroupID) {
-        // put all processes in the shell's process group into the background
+        // suspends all processes in the shell's process group
         kill(-shellProcessGroupID, SIGTTIN);
       } else {
         break;
@@ -95,33 +99,33 @@ void init_shell() {
     // Save the current termios to a variable, so it can be restored later.
     tcgetattr(shellInputFileNum, &shell_tmodes);
   }
+
+  /**
+   * once the shell is in the teletype's foreground process group, its signal
+   * handlers can be configured.
+   * 
+   * for security and stability reasons, the kernel will not use the
+   * sigaction struct stored in the user memory. Instead, it should copy
+   * the content of the user memory sigaction struct into a kernel memory 
+   * signaction struct. In that case, the user memory sigaction struct is
+   * never again referrenced after signaction() returns, so we can use a
+   * singleton sigaction struct as the argument when calling sigaction()
+   * with different signals.
+   */
+  struct sigaction signalHandler;
+  signalHandler.sa_handler = ignore_signal;
+
+  const struct signal_group *ignoredSignals = get_ignored_signals();
+  for (int index = 0; index < ignoredSignals->numOfSignals; index++) {
+    sigaction(ignoredSignals->signals[index], &signalHandler, NULL);
+  }
+  return;
 }
 
-/**
- * TODO: what are the expectations on the shell?
- * 1) the shell is not affected by any of the listed signals. If a
- *    oreground process group exists, the signal should be sent to
- *    the entire foreground process group;
- *  a) the shell must be registered with handlers that ignore the listed
- *     signals, so that even when there is no subprocesses, the shell is
- *     not affected by the signals;
- *  b) the shell must set the latest subprocess group as the foreground
- *     process of the TTY, so that signals can be sent directly to the
- *     subprocesses, without affecting the shell;
- *  c) does the exec() syscall changes the signal handlers of a process?
- *     If not, the subprocesses must de-register the handlers that they
- *     inherit from the shell process, so that they cannot ignore the
- *     signal like the shell and do not cause loops in trying to send the
- *     signal to the foreground process group;
- * 2) processes from each new program/pipeline should be put in their own
- *    process group;
- *  a) processes on the same commandline/pipeline will be placed in the
- *     same process group, which is named after the first process of that
- *     group;
- */
+
 
 /**
- * Built-in commands of this shell
+ * Built-in commands of the shell
  */
 // Convenience macro to silence compiler warnings about unused function parameters.
 #define unused __attribute__((unused))
@@ -229,7 +233,9 @@ int lookup(char cmd[]) {
 }
 
 
-
+/**
+ * Main functional components of the shell
+ */
 /**
  * Interpret and run the command line arguments.
  * 
@@ -244,10 +250,19 @@ int execute_commandline(struct tokens *tokens) {
 
   /*
    * check the command line syntax, and execute it in different mode based on
-   * its syntax: input/output redirect, piping, and command/program call
+   * its syntax: input/output redirect, piping, and command/program call.
    */
   int syntax = 0;
-  if ((syntax = contains_redirection(tokens))) {
+  pid_t *subprocessIDs = NULL;
+  if (is_tokens_empty(tokens)) {
+    /*
+     * if the user sent a signal through the terminal, or if the command
+     * starts with a newline character, the command tokens will be empty,
+     * and the shell should return right away
+     */
+    return 0;
+
+  } else if ((syntax = contains_redirection(tokens))) {
     // extract the program name, program arguments, and redirection file name
     char *programName = NULL, **argList = NULL, *fileName = NULL;
     int result = parse_redirection_tokens(tokens, &programName, &argList, &fileName);
@@ -255,10 +270,9 @@ int execute_commandline(struct tokens *tokens) {
       fprintf(stderr, "Failed to parse program name and arguments from command line\n");
       return -1;
     }
-
     // execute the redirected program
-    int exitStatus = execute_redirected_program(programName, argList, syntax, fileName);
-    return exitStatus;
+    subprocessIDs = execute_redirected_program(programName, argList, syntax, fileName); /** TODO: remember to free this */
+
   } else if (contains_piping(tokens)) {
     // extract the program names amd program argument lists
     char **programNames = NULL, ***argLists = NULL;
@@ -267,39 +281,46 @@ int execute_commandline(struct tokens *tokens) {
       fprintf(stderr, "Failed to parse program name and arguments from command line\n");
       return -1;
     }
-
     // execute the piped program
-    int exitStatus = execute_piped_program((const char **) programNames, (const char ***) argLists);
-    return exitStatus;
-  }
+    subprocessIDs = execute_piped_program((const char **) programNames, (const char ***) argLists); /** TODO: remember to free this */
 
-  /*
-   * if the command line has no special syntax, then either find and run the
-   * built-in command, or run the program;
-   */
-  int commandIndex = lookup(get_program_name(tokens));
-  if (commandIndex >= 0) {
-    return cmd_table[commandIndex].fun(tokens);
   } else {
-    // extract the program name and arguments
-    char *programName = NULL, **argList = NULL;
-    int result = parse_tokens(tokens, &programName, &argList);
-    if (result != 0) {
-      fprintf(stderr, "Failed to parse program name and arguments from command line\n");
-      return -1;
+    /*
+     * if the command line has no special syntax, then either find and run the
+     * built-in command, or run the program;
+     */
+    int commandIndex = lookup(get_program_name(tokens));
+    if (commandIndex >= 0) {
+      return cmd_table[commandIndex].fun(tokens);
+    } else {
+      // extract the program name and arguments
+      char *programName = NULL, **argList = NULL;
+      int result = parse_tokens(tokens, &programName, &argList);
+      if (result != 0) {
+        fprintf(stderr, "Failed to parse program name and arguments from command line\n");
+        return -1;
+      }
+      // execute the program
+      subprocessIDs = execute_program(programName, argList); /** TODO: remember to free this */
     }
-
-    // execute the program
-    int exitStatus = execute_program(programName, argList);
-    return exitStatus;
   }
+
+  if (subprocessIDs == NULL) {
+    fprintf(stderr, "Failed to execute\n");
+    return -1;
+  }
+  
+  // wait till the subprocesses have completed
+  int status = manage_shell_subprocesses(subprocessIDs, shellInputFileNum, shellOutputFileNum);
+  free(subprocessIDs);
+  return status;
 }
 
 /**
  * The shell program.
  */
 int main(unused int argc, unused char *argv[]) {
-  init_shell();
+  initialize_shell();
 
   static char line[4096];
   struct tokens *tokens = NULL;

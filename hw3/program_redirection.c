@@ -211,7 +211,8 @@ int parse_redirection_tokens(struct tokens *tokens, char **programNamePtr, char 
 
 /**
  * Execute the given program with the given arguments, accounting for the
- * redirection options.
+ * redirection options. The subprocess will be suspended until it receives
+ * a SIG_CONT.
  * 
  * Takes the ownership of argument list and frees it.
  * 
@@ -221,17 +222,17 @@ int parse_redirection_tokens(struct tokens *tokens, char **programNamePtr, char 
  *                        output redirect, and 0 for no redirect
  * @param redurectionFileName The redirection file name
  * 
- * @return int Returns 0 if the program executed successfully, or -1 otherwise
+ * @return pid_t* Returns a list of subprocess IDs
  */
-int execute_redirected_program(const char *programName, char **programArgList, int redirectionType, const char *redirectionFileName) {
+pid_t *execute_redirected_program(const char *programName, char **programArgList, int redirectionType, const char *redirectionFileName) {
   // edge cases
   if (programName == NULL || programArgList == NULL) {
-    return -1;
+    return NULL;
   }
   if (redirectionType && redirectionFileName == NULL) {
     fprintf(stderr, "Redirecting input/out without valid file name\n");
     free(programArgList);
-    return -1;
+    return NULL;
   }
   const int INPUT_REDIRECTION = -1;
   const int OUTPUT_REDIRECTION = 1;
@@ -241,16 +242,28 @@ int execute_redirected_program(const char *programName, char **programArgList, i
   if (programFullPath == NULL) {
     fprintf(stderr, "No such executable program\n");
     free(programArgList);
-    return -1;
+    return NULL;
   }
+
+  // allocate memory for the process ID list
+  pid_t *processIDs = (pid_t *) malloc((1 + 1) * sizeof(pid_t)); /** TODO: remember to free this */
+  if (processIDs == NULL) {
+    perror("Failed to allocate memory: ");
+    free(programFullPath);
+    free(programArgList);
+    return NULL;
+  }
+  // the process ID list should end with a -1
+  processIDs[1] = -1;
 
   // execute the program as a child process
   pid_t processID = fork();
   if (processID == -1) {
     perror("Failed to create new process: ");
+    free(processIDs);
     free(programFullPath);
     free(programArgList);
-    return -1;
+    return NULL;
   } else if (processID == 0) {
     /*
       * this is the child process, and it should be run with stdin/stdout
@@ -269,6 +282,7 @@ int execute_redirected_program(const char *programName, char **programArgList, i
         */
       redirectionFileDescriptor = open(redirectionFileName, O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH);
     }
+
     if (redirectionFileDescriptor == -1) {
       fprintf(stderr, "Failed to open file: %s\n", redirectionFileName);
       perror("Input/output redirection failed: ");
@@ -300,23 +314,17 @@ int execute_redirected_program(const char *programName, char **programArgList, i
       close(redirectionFileDescriptor);
     }
 
-    // execute the requested program with I/O redirection
+    /*
+     * execute the given program ith I/O redirection; but first, suspend this
+     * process so that the shell process can assign it to another process group
+     */
+    kill(getpid(), SIGSTOP);
     execv(programFullPath, (char *const *) programArgList);
   }
 
-  /*
-   * this is the parent process, which returns only after waiting for the
-   * child process to terminate
-   */
-  int terminatedProcessID = waitpid(processID, NULL, 0);
-  if (terminatedProcessID == -1) {
-    perror("Failed to wait for child process to terminate: ");
-    free(programFullPath);
-    free(programArgList);
-    return -1;
-  }
-  
+  // this is the parent process, which returns the list of child process IDs
+  processIDs[0] = processID;  
   free(programFullPath);
   free(programArgList);
-  return 0;
+  return processIDs;
 }

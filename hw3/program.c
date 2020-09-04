@@ -46,7 +46,7 @@ int get_program_arguments(struct tokens *tokens, char ***argListPtr) {
     *argList = NULL;
     return -1;
   }
-  // the argument list must be terminated by a NULL pointer
+  // the argument list should end with a NULL pointer
   argList[argListLength] = NULL;
 
   // extract all the command tokens into the argument list
@@ -99,54 +99,60 @@ int parse_tokens(struct tokens *tokens, char **programNamePtr, char ***argListPt
 }
 
 /**
- * Execute the given program with the given arguments.
+ * Execute the given program with the given arguments. The subprocess will
+ * be suspended until it receives a SIG_CONT.
  * 
  * @param programName The program name
  * @param programArgList The list of program arguments; will be freed by this function
  * 
- * @return int Returns 0 if the program executed successfully, or -1 otherwise
+ * @return pid_t* Returns a list of subprocess IDs
  */
-int execute_program(const char *programName, char **programArgList) {
+pid_t *execute_program(const char *programName, char **programArgList) {
   // edge cases
   if (programName == NULL || programArgList == NULL) {
-    return -1;
+    return NULL;
   }
 
   char *programFullPath = resolve_executable_full_path(programName); /** TODO: remember to free this */
   if (programFullPath == NULL) {
     fprintf(stderr, "No such executable program\n");
     free(programArgList);
-    return -1;
+    return NULL;
   }
+
+  // allocate memory for the process ID list
+  pid_t *processIDs = (pid_t *) malloc((1 + 1) * sizeof(pid_t)); /** TODO: remember to free this */
+  if (processIDs == NULL) {
+    perror("Failed to allocate memory: ");
+    free(programFullPath);
+    free(programArgList);
+    return NULL;
+  }
+  // the process ID list should end with a -1
+  processIDs[1] = -1;
 
   // execute the program as a child process
   pid_t processID = fork();
   if (processID == -1) {
     perror("Failed to create new process: ");
+    free(processIDs);
     free(programFullPath);
     free(programArgList);
-    return -1;
+    return NULL;
   } else if (processID == 0) {
     /*
-      * this is the child process, so execute the program. The child process
-      * should exit via the new process image, so there's no need to return
-      */
+     * this is the child process, so execute the program; but first, suspend
+     * this process so that the shell process can assign it to another process
+     * group. The child process should exit via the new process image, so
+     * there's no need to return
+     */
+    kill(getpid(), SIGSTOP);
     execv(programFullPath, (char *const *) programArgList);
   }
 
-  /*
-   * this is the parent process, which returns only after waiting for the
-   * child process to terminate
-   */
-  int terminatedProcessID = waitpid(processID, NULL, 0);
-  if (terminatedProcessID == -1) {
-    perror("Failed to wait for child process to terminate: ");
-    free(programFullPath);
-    free(programArgList);
-    return -1;
-  }
-  
+  // this is the parent process, which returns the list of child process IDs
+  processIDs[0] = processID;
   free(programFullPath);
   free(programArgList);
-  return 0;
+  return processIDs;
 }

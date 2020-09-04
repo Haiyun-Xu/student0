@@ -438,7 +438,8 @@ int parse_piping_tokens(struct tokens *tokens, char ***programNamesPtr, char ***
 
 /**
  * Executes a program, with default input and output file descriptors
- * redirected to the given file descriptors.
+ * redirected to the given file descriptors. The subprocess will be
+ * suspended until it receives a SIG_CONT.
  * 
  * This function should only be called by a forked child process, as it
  * switches the caller program image into the given program image, and
@@ -485,25 +486,30 @@ void execute_with_redirection(char *programFullPath, char **programArgList, int 
     close(outputFileNum);
   }
 
-  // execute the given program ith I/O redirection
+  /*
+   * execute the given program ith I/O redirection; but first, suspend this
+   * process so that the shell process can assign it to another process group
+   */
+  kill(getpid(), SIGSTOP);
   execv(programFullPath, (char* const *) programArgList);
 }
 
 /**
  * Execute the given programs with the given arguments, accounting for the
- * piping options.
+ * piping options. The subprocesses will be suspended until they receive a
+ * SIG_CONT.
  * 
  * Takes the ownership of argument list and frees it.
  * 
  * @param programNames The array of program names
  * @param programArgLists The array of program argument lists; will be freed by this function
  * 
- * @return int Returns 0 if the program executed successfully, or -1 otherwise
+ * @return pid_t* Returns the list of subprocess IDs
  */
-int execute_piped_program(const char **programNames, const char ***programArgLists) {
+pid_t *execute_piped_program(const char **programNames, const char ***programArgLists) {
   // edge cases
   if (programNames == NULL || programArgLists == NULL) {
-    return -1;
+    return NULL;
   }
 
   // resolve the full paths of the program executables
@@ -512,7 +518,7 @@ int execute_piped_program(const char **programNames, const char ***programArgLis
     fprintf(stderr, "No such executable program\n");
     free_program_names((char **) programNames);
     free_program_argument_lists((char ***) programArgLists);
-    return -1;
+    return NULL;
   }
 
   // count the number of programs to call
@@ -521,13 +527,13 @@ int execute_piped_program(const char **programNames, const char ***programArgLis
     numOfPrograms++;
 
   // allocate memory for the program process IDs
-  pid_t *processIDs = (pid_t *) malloc((numOfPrograms + 1) * sizeof(pid_t));
+  pid_t *processIDs = (pid_t *) malloc((numOfPrograms + 1) * sizeof(pid_t));  /** TODO: remember to free this */
   if (processIDs == NULL) {
     perror("Failed to allocate memory: ");
     free_file_paths(programFullPaths);
     free_program_names((char **) programNames);
     free_program_argument_lists((char ***) programArgLists);
-    return -1;
+    return NULL;
   }
   // assign -1 to all unused locations to signal a stop to traversal
   for (int index = 0; index < numOfPrograms; index++) {
@@ -564,6 +570,7 @@ int execute_piped_program(const char **programNames, const char ***programArgLis
     pid_t processID = fork();
     if (processID == -1) {
       perror("Failed to create new process: ");
+      free(processIDs);
       free_file_paths(programFullPaths);
       free_program_names((char **) programNames);
       free_program_argument_lists((char ***) programArgLists);
@@ -594,18 +601,9 @@ int execute_piped_program(const char **programNames, const char ***programArgLis
       close(outputFileNum);
   }
 
-  /*
-   * wait for the child processes to terminate; check for process ID = -1,
-   * in case the pipeline aborted early
-   */
-  for (int index = 0; index < numOfPrograms && processIDs[index] != -1; index++) {
-    int terminatedProcessID = waitpid(processIDs[index], NULL, 0);
-    if (terminatedProcessID == -1) {
-      perror("Failed to wait for child process to terminate: ");
-    }
-  }
+  // after creating all the subprocesses, return the list of process IDs
   free_file_paths(programFullPaths);
   free_program_names((char **) programNames);
   free_program_argument_lists((char ***) programArgLists);
-  return 0;
+  return processIDs;
 }

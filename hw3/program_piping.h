@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -144,33 +145,17 @@ int get_piped_program_arguments(struct tokens *tokens, char ****programArgListsP
 int parse_piping_tokens(struct tokens *tokens, char ***programNamesPtr, char ****argListsPtr);
 
 /**
- * Executes a program, with default input and output file descriptors
- * redirected to the given file descriptors.
- * 
- * This function should only be called by a forked child process, as it
- * switches the caller program image into the given program image, and
- * does not return.
- * 
- * @param programFullPath The full path of the executable file
- * @param programArgList A list of argument strings
- * @param inputFileNum The number of the file descriptor replacing default input
- * @param outputFileNum The number of the file descriptor replacing default output
- * 
- * @return void
- */
-void execute_with_redirection(char *programFullPath, char **programArgList, int inputFileNum, int outputFileNum);
-
-/**
  * Execute the given programs with the given arguments, accounting for the
- * piping options.
+ * piping options. The subprocesses will be suspended until they receive a
+ * SIG_CONT.
  * 
  * Takes the ownership of argument list and frees it.
  * 
  * @param programNames The array of program names
  * @param programArgLists The array of program argument lists; will be freed by this function
  * 
- * @return int Returns 0 if the program executed successfully, or -1 otherwise
+ * @return pid_t* Returns the list of subprocess IDs
  */
-int execute_piped_program(const char **programNames, const char ***programArgLists);
+pid_t *execute_piped_program(const char **programNames, const char ***programArgLists);
 
 #endif /* PROGRAM_PIPING_H */

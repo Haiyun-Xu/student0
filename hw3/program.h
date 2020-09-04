@@ -8,9 +8,11 @@
 #ifndef PROGRAM_H
 #define PROGRAM_H
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -54,13 +56,14 @@ int get_program_arguments(struct tokens *tokens, char ***argListPtr);
 int parse_tokens(struct tokens *tokens, char **programNamePtr, char ***argListPtr);
 
 /**
- * Execute the given program with the given arguments.
+ * Execute the given program with the given arguments. The subprocess will
+ * be suspended until it receives a SIG_CONT.
  * 
  * @param programName The program name
  * @param programArgList The list of program arguments; will be freed by this function
  * 
- * @return int Returns 0 if the program executed successfully, or -1 otherwise
+ * @return pid_t* Returns a list of subprocess IDs
  */
-int execute_program(const char *programName, char **programArgList);
+pid_t *execute_program(const char *programName, char **programArgList);
 
 #endif /* PROGRAM_H */

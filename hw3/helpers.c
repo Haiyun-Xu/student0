@@ -99,6 +99,27 @@ char *join_strings(char *const *strings, const char separator) {
 }
 
 /**
+ * Checks whether the tokens list is empty;
+ * 
+ * @param tokens The list of command tokens
+ * 
+ * @return Returns 1 if the tokens list is empty, or 0 otherwise
+ */
+int is_tokens_empty(struct tokens *tokens) {
+  // edge cases
+  if (tokens == NULL) {
+    return 0;
+  }
+
+  char *argument  = tokens_get_token(tokens, 0);
+  if (argument == NULL) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+/**
  * Checks whether the file is executable.
  * 
  * @param filePath The full path of the file

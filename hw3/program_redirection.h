@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -95,7 +96,8 @@ int parse_redirection_tokens(struct tokens *tokens, char **programNamePtr, char 
 
 /**
  * Execute the given program with the given arguments, accounting for the
- * redirection options.
+ * redirection options. The subprocess will be suspended until it receives
+ * a SIG_CONT.
  * 
  * Takes the ownership of argument list and frees it.
  * 
@@ -105,8 +107,8 @@ int parse_redirection_tokens(struct tokens *tokens, char **programNamePtr, char 
  *                        output redirect, and 0 for no redirect
  * @param redurectionFileName The redirection file name
  * 
- * @return int Returns 0 if the program executed successfully, or -1 otherwise
+ * @return pid_t* Returns a list of subprocess IDs
  */
-int execute_redirected_program(const char *programName, char **programArgList, int redirectionType, const char *redirectionFileName);
+pid_t *execute_redirected_program(const char *programName, char **programArgList, int redirectionType, const char *redirectionFileName);
 
 #endif /* PROGRAM_REDIRECTION_H */
