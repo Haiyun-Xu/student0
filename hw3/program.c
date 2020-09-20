@@ -8,6 +8,29 @@
 #include "program.h"
 
 /**
+ * Checks whether the program should be executed in the background. A program
+ * with the background execution flag always has the form "[command] &".
+ * 
+ * @param tokens The list of command tokens
+ * 
+ * @return int Returns 1 if there's the program should be executed in the background, or 0 if not
+ */
+int should_exec_in_background(struct tokens *tokens) {
+  // edge cases
+  if (tokens == NULL) {
+    return 0;
+  }
+
+  size_t tokenLength = tokens_get_length(tokens);
+  char *argument = tokens_get_token(tokens, tokenLength - 1);
+  if (strcmp(argument, "&") == 0) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+/**
  * Return the program name.
  * 
  * @param tokens The list of command tokens
@@ -147,6 +170,7 @@ pid_t *execute_program(const char *programName, char **programArgList) {
      * there's no need to return
      */
     kill(getpid(), SIGSTOP);
+    reset_ignored_signals();
     execv(programFullPath, (char *const *) programArgList);
   }
 

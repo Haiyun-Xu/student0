@@ -319,6 +319,7 @@ pid_t *execute_redirected_program(const char *programName, char **programArgList
      * process so that the shell process can assign it to another process group
      */
     kill(getpid(), SIGSTOP);
+    reset_ignored_signals();
     execv(programFullPath, (char *const *) programArgList);
   }
 

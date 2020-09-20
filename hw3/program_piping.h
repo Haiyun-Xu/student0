@@ -18,6 +18,7 @@
 
 #include "tokenizer.h"
 #include "helpers.h"
+#include "shell_signal.h"
 
 /**
  * Checks whether the given argument is the pipe symbol.

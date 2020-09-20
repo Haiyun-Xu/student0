@@ -19,7 +19,7 @@
 
 #include "helpers.h"
 #include "tokenizer.h"
-
+#include "shell_signal.h"
 
 /**
  * Checks whether the given argument is the redirect symbol.

@@ -11,9 +11,59 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+/**
+ * A process node in a doubly-linked process list.
+ */
+struct process_node {
+  pid_t processID;
+  struct process_node *prev;
+  struct process_node *next;
+};
+
+/**
+ * Initialize the process list managed by the shell.
+ * 
+ * @return int Returns 0 if successful, or -1 if not
+ */
+int initialize_process_list();
+
+/**
+ * Desctroy the process list managed by the shell.
+ * 
+ * @return void
+ */
+void destroy_process_list();
+
+/**
+ * Return the latest process in the process list.
+ * 
+ * @return pid_t The process ID
+ */
+pid_t get_latest_process();
+
+/**
+ * Add a process to the process list managed by the shell. If the process list
+ * was not initialized, this function initializes it as well.
+ * 
+ * @param processID The ID of the process to be added
+ * 
+ * @return int Returns 0 if successful, or -1 if failed
+ */
+int add_process(pid_t processID);
+
+/**
+ * Remove a process from the process list.
+ * 
+ * @param processID The ID of the process to be removed
+ * 
+ * @return void
+ */
+void remove_process(pid_t processID);
 
 /**
  * Place the given list of processes into the same process group, which is
@@ -53,70 +103,53 @@ pid_t get_process_group(pid_t processID);
 int set_foreground_process_group(int terminalFileNum, pid_t processGroupID);
 
 /**
- * Reclaim the foreground status for the current process group.
+ * Set the process group of the given process as the foreground process group
+ * associated with the given controlling terminal.
  * 
  * @param terminalFileNum The file descriptor number of the terminal
+ * @param processGroupID The process group ID
  * 
- * @return int Returns 0 if successful, or 1 otherwise
+ * @return int Returns 0 if successful, or -1 otherwise
  */
-int reclaim_foreground_process_group(int terminalFileNum);
+int set_foreground_process(int terminalFileNum, pid_t processID);
 
 /**
  * To start a suspended process group.
  * 
- * Since the shell process has no idea whether a process has suspended
- * itself, if we naively send a SIGCONT to the process, it may result
- * in the signal arriving before the process suspends itself, and causing
- * the process to be indefinitely suspended.
- * 
- * Therefore, before calling this function, the shell process must first wait
- * for all the processes to be suspended, and only then can it send SIGCONT
- * to the process group.
- * 
  * @param processGroupID The process group ID
  * 
- * @return void
+ * @return int Returns 0 if successful, or -1 otherwise
  */
-void start_process_group(pid_t processGroupID);
+int start_process_group(pid_t processGroupID);
 
 /**
- * Wait untill ALL processes in the given list have suspended.
+ * To start a suspended process.
  * 
- * NOTE: if any process does not suspend predictably, then this function will
- * never return.
+ * @param processID The process ID
  * 
- * @param processIDs The list of process IDs
- * 
- * @return int Returns 0 if all process have been suspended, or 1 if any
- *             process was not suspended
+ * @return int Returns 0 if successful, or -1 otherwise
  */
-int wait_for_processes_to_pause(pid_t *processIDs);
-
-/**
- * Wait until ALL processes in the given list have exited.
- * 
- * @param processIDs The list of process IDs
- * 
- * @return int Returns 0 if all processes exited successfully, or 1 if any
- *             process exited with an error status
- */
-int wait_for_processes_to_exit(pid_t *processIDs);
+int start_process(pid_t processID);
 
 /**
  * Manage a group of shell subprocesses by doing the following:
- * 1) wait for all the subprocesses to suspend themselves;
- * 2) place the subprocesses into the same process group;
- * 3) set that process group as the foreground of the terminal;
- * 4) alow the process group to execute new program images;
- * 5) wait for the process group to exit;
- * 6) reclaim the terminal foreground for the shell;
+ * 1) wait for all of the subprocesses to suspend themselves;
+ * 2) add all subprocesses to the shell subprocess list;
+ * 3) place the subprocesses into the same process group;
+ * 4) depending on the background-execution flag, either:
+ *    a) set that process group in the background, allow it to resume,
+ *    and return, or;
+ *    a) set that process group as the foreground of the terminal, allow it
+ *    to resume, then wait for all of the subprocesses to exit, and reclaim
+ *    the terminal foreground for the shell;
  * 
  * @param processIDs The list of subprocessIDs
  * @param terminalInputFileNum The input file descriptor number of the terminal
  * @param terminalOutputFileNum The output file descriptor number of the terminal
+ * @param backgroundExecution Whether the process should be placed in the background
  * 
  * @return int Returns 0 if successful, or -1 otherwise;
  */
-int manage_shell_subprocesses(pid_t *subprocessIDs, int terminalInputFileNum, int terminalOutputFileNum);
+int manage_shell_subprocesses(pid_t *subprocessIDs, int terminalInputFileNum, int terminalOutputFileNum, bool backgroundExecution);
 
 #endif /* PROCESS_MANAGEMENT_H */

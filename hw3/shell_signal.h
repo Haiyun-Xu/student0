@@ -11,30 +11,24 @@
 
 #include <stdio.h>
 #include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#include "shell_config.h"
+#include "process_management.h"
 
 /**
- * A group of signals. The maximum number of signals that can be contained in
- * the struct is3, because currently there are 32 POSIX signals.
- */
-struct signal_group {
-  const int numOfSignals;
-  const int signals[33];
-};
-
-/**
- * Get the set of ignored signals.
+ * Resets the current process's ignored signal handlers to the default hanlder.
  * 
- * @return const struct signal_group* The set of ignored signaals
+ * @return int Returns 0 if successful, or -1 otherwise
  */
-const struct signal_group *get_ignored_signals();
+int reset_ignored_signals();
 
 /**
- * Ignores a signal. This is a substitute of the built-in SIG_IGN option,
- * because the effect of the latter persists through an execve() call and
- * will result in the new process image to ignore the signal as well.
+ * Register signal handlers for the shell.
  * 
- * @param signalID The numeric identifier of the signal
+ * @return int Returns 0 if successful, or -1 if failed
  */
-void ignore_signal(int signalID);
+int register_shell_signal_handlers();
 
 #endif /* SHELL_SIGNAL_H */

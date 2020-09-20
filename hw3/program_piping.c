@@ -491,6 +491,7 @@ void execute_with_redirection(char *programFullPath, char **programArgList, int 
    * process so that the shell process can assign it to another process group
    */
   kill(getpid(), SIGSTOP);
+  reset_ignored_signals();
   execv(programFullPath, (char* const *) programArgList);
 }
 

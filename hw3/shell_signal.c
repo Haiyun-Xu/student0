@@ -8,30 +8,29 @@
 
 #include "shell_signal.h"
 
-/*
- * the set of signals that the shell process should ignore;
- * SIGKILL and SIGSTOP cannot be ignored;
+/**
+ * A group of signals. The maximum number of signals that can be contained in
+ * the struct is 33, because Linux currently supports 33 different real-time
+ * signals
+ */
+struct signal_group {
+  const int numOfSignals;
+  const int signals[33];
+};
+
+/* 
+ * SIGINT, SIGQUIT, and SIGSTP are signals that can be sent by the terminal,
+ * and so they should be ignored .
  * 
- * As long as forked subprocesses are placed in the foreground, signals
- * received by the shell will truly be intended for the shell and do not
- * need to be re-routed to its foreground subprocess. Therefore, when
- * considering how the shell should handle a signal, we don't need to
- * consider rerouting the signal to another process.
- * 
- * Reasons for handling the following signals in the shell:
- * 1) SIGINT: terminates the process; should ignore this, because the shell
- * shouldn't be terminated by anything other than an "exit" command;
- * 2) SIGPIPE: if a shell receives this signal, then it's writing to a pipe
- * with no readers and it should fail; by ignore this signal, the shell
- * process would fail with an error EPIPE;
- * 3) SIGQUIT: similar to SIGINT; should ignore this;
- * 4) SIGTERM: similar to SIGQUIT, but also produce a core dump; should
- * ignore this;
- * 5) SIGTSTP: similar to SIGSTOP; should ignore this;
+ * If the shell is not in the foreground, then the terminal signals would
+ * be sent to processes in the foreground, which makes the signals that
+ * the shell receives (while being in the background) truly targeted at
+ * the shell. If the shell is in the foreground, then it will receive the
+ * terminal signals, but should ignore them.
  */
 static const struct signal_group IGNORED_SIGNALS = {
-  5,
-  {SIGINT, SIGPIPE, SIGQUIT, SIGTERM, SIGTSTP}
+  3,
+  {SIGINT, SIGQUIT, SIGTSTP}
 };
 
 /**
@@ -44,12 +43,107 @@ const struct signal_group *get_ignored_signals() {
 }
 
 /**
- * Ignores a signal. This is a substitute of the built-in SIG_IGN option,
- * because the effect of the latter persists through an execve() call and
- * will result in the new process image to ignore the signal as well.
+ * A custom signal handler that ignores the signal.
  * 
- * @param signalID The numeric identifier of the signal
+ * @param sigNum The signal number
  */
-void ignore_signal(int signalID) {
+void signal_ignorer(int sigNum) {
   return;
+}
+
+/**
+ * Configures the current process to ignore the list of ignored signal.
+ * 
+ * @return int Returns 0 if successful, or -1 otherwise
+ */
+int ignore_signals() {
+  const struct signal_group *signalsToIgnore = get_ignored_signals();
+  int result = 0;
+
+  /* 
+   * each of the signals should be ignored, and if the signal interrupts a
+   * system call, the system call should NOT be automatically restarted
+   */
+  struct sigaction signalAction;
+  signalAction.sa_handler = signal_ignorer;
+  signalAction.sa_flags = 0;
+
+  for (int index = 0; index < signalsToIgnore->numOfSignals; index++) {
+    result = sigaction(signalsToIgnore->signals[index], &signalAction, NULL);
+    if (result == -1) {
+      perror("Failed to register signal handler: ");
+      return -1;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Resets the current process's ignored signal handlers to the default hanlder.
+ * 
+ * @return int Returns 0 if successful, or -1 otherwise
+ */
+int reset_ignored_signals() {
+  struct sigaction signalAction;
+  signalAction.sa_handler = SIG_DFL;
+  const struct signal_group *signalsToIgnore = get_ignored_signals();
+  int result = 0;
+
+  for (int index = 0; index < signalsToIgnore->numOfSignals; index++) {
+    result = sigaction(signalsToIgnore->signals[index], &signalAction, NULL);
+    if (result == -1) {
+      perror("Failed to reset signal handler: ");
+      return -1;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Handle the SIGCHLD signal.
+ * 
+ * This handler should be assigned to the "sa_signaction" field of the
+ * sigaction struct, and is only used if the SA_SIGINFO flag is specified
+ * in the "sigaction.sa_flags" field during the handler registration via
+ * sigaction(). The SA_NOCLDSTOP flag should also be specified in the
+ * "sigaction.sa_flags" field, so that the handler is not triggered for
+ * pausing/resuming events.
+ * 
+ * @param signalNum The numeric identifier of the signal
+ * @param signalInfo A structure containing signal info
+ * @param signalContext A structure containing signal context (not used)
+ * 
+ * @return void
+ */
+void handle_sigchld(int signalNum, siginfo_t *signalInfo, void *signalContext) {
+  /**
+   * as part of the shell's processs management, child processes that
+   * have exited must be removed from the shell's process list. However,
+   * the shell cannot be waiting all the time for the child processes to
+   * exit, so thie removal from the process list must be done passively
+   * via a handler to the SIGCHLD signal
+   * 
+   * And since this custom handler is used in place of the default behavior,
+   * we must reap the process by calling wait() on that process
+   */
+  pid_t processID = signalInfo->si_pid;
+  waitpid(processID, NULL, 0);
+  remove_process(processID);
+  return;
+}
+
+/**
+ * Register signal handlers for the shell.
+ * 
+ * @return int Returns 0 if successful, or -1 if failed
+ */
+int register_shell_signal_handlers() {
+  int result = 0;
+
+  // ignore the terminal signals
+  result = ignore_signals();
+  if (result == -1) {
+    return -1;
+  }
+  return 0;
 }

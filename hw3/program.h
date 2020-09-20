@@ -18,6 +18,17 @@
 
 #include "helpers.h"
 #include "tokenizer.h"
+#include "shell_signal.h"
+
+/**
+ * Checks whether the program should be executed in the background. A program
+ * with the background execution flag always has the form "[command] &".
+ * 
+ * @param tokens The list of command tokens
+ * 
+ * @return int Returns 1 if there's the program should be executed in the background, or 0 if not
+ */
+int should_exec_in_background(struct tokens *tokens);
 
 /**
  * Return the program name.

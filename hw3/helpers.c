@@ -99,6 +99,24 @@ char *join_strings(char *const *strings, const char separator) {
 }
 
 /**
+ * Clean the entire string by overwriting it with null char.
+ * 
+ * @param string The string to be cleaned
+ * @param length The length of the string
+ */
+void clean_string(char *string, int length) {
+  // edge cases
+  if (string == NULL || length <= 0) {
+    return;
+  }
+
+  for (int index = 0; index < length; index++) {
+    string[index] = '\0';
+  }
+  return;
+}
+
+/**
  * Checks whether the tokens list is empty;
  * 
  * @param tokens The list of command tokens

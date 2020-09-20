@@ -49,6 +49,14 @@ char *concatenate_strings(const char *prefix, const char *suffix);
 char *join_strings(char *const *strings, const char separator);
 
 /**
+ * Clean the entire string by overwriting it with null char.
+ * 
+ * @param string The string to be cleaned
+ * @param length The length of the string
+ */
+void clean_string(char *string, int length);
+
+/**
  * Checks whether the tokens list is empty;
  * 
  * @param tokens The list of command tokens
