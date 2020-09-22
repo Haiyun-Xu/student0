@@ -8,17 +8,19 @@
 #ifndef SHELL_COMMAND_H
 #define SHELL_COMMAND_H
 
-#include <ctype.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
-#include "process_management.h"
 #include "shell_config.h"
 #include "tokenizer.h"
+#include "helpers.h"
+#include "process_list.h"
+#include "process_management.h"
 
 // convenience macro to silence compiler warnings about unused function parameters.
 #define unused __attribute__((unused))
@@ -29,7 +31,7 @@ typedef int command_t(struct tokens *tokens);
 /**
  * A built-in command of the shell. Brings up the help menu and prints a helpful description for the given command
  * 
- * @return int Returns 0 if successful, pr -1 otherwise
+ * @return int Returns 0 if successful, or -1 otherwise
  */
 int cmd_help(unused struct tokens *tokens);
 
@@ -43,7 +45,7 @@ int cmd_exit(unused struct tokens *tokens);
 /**
  * A built-in command of the shell. Prints the current working directory in the file system.
  * 
- * @return int Returns 0 if successful, pr -1 otherwise
+ * @return int Returns 0 if successful, or -1 otherwise
  */
 int cmd_pwd(unused struct tokens *tokens);
 
@@ -52,9 +54,17 @@ int cmd_pwd(unused struct tokens *tokens);
  * 
  * @param tokens The list of command arguments
  * 
- * @return int Returns 0 if successful, pr -1 otherwise
+ * @return int Returns 0 if successful, or -1 otherwise
  */
 int cmd_cd(struct tokens *tokens);
+
+/**
+ * A built-in command of the shell. Wait untill all of the shell's background
+ * processes to exit.
+ * 
+ * @return int Returns 0 if successful, or -1 otherwise
+ */
+int cmd_wait(struct tokens *tokens);
 
 /**
  * A built-in command of the shell. Moves a given process to the foreground.

@@ -1,4 +1,4 @@
-SRCS=tokenizer.c helpers.c shell_signal.c process_management.c program.c program_redirection.c program_piping.c shell_command.c shell.c
+SRCS=tokenizer.c helpers.c shell_signal.c process_list.c process_management.c program.c program_redirection.c program_piping.c shell_command.c shell.c
 EXECUTABLES=shell
 
 CC=gcc

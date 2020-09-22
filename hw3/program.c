@@ -8,29 +8,6 @@
 #include "program.h"
 
 /**
- * Checks whether the program should be executed in the background. A program
- * with the background execution flag always has the form "[command] &".
- * 
- * @param tokens The list of command tokens
- * 
- * @return int Returns 1 if there's the program should be executed in the background, or 0 if not
- */
-int should_exec_in_background(struct tokens *tokens) {
-  // edge cases
-  if (tokens == NULL) {
-    return 0;
-  }
-
-  size_t tokenLength = tokens_get_length(tokens);
-  char *argument = tokens_get_token(tokens, tokenLength - 1);
-  if (strcmp(argument, "&") == 0) {
-    return 1;
-  } else {
-    return 0;
-  }
-}
-
-/**
  * Return the program name.
  * 
  * @param tokens The list of command tokens
@@ -51,18 +28,28 @@ char *get_program_name(struct tokens *tokens) {
  * 
  * @param tokens The list of command arguments
  * @param argListPtr The address of an argument list
+ * @param bgExecPtr The address of the background execution flag
  * 
  * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int get_program_arguments(struct tokens *tokens, char ***argListPtr) {
+int get_program_arguments(struct tokens *tokens, char ***argListPtr, bool *bgExecPtr) {
   // edge cases
   if (tokens == NULL || argListPtr == NULL) {
     *argListPtr = NULL;
     return -1;
   }
+
+  /*
+   * if the last argument is a background-execution flag, only parse the
+   * arguments before that
+   */
+  size_t argListLength = tokens_get_length(tokens);
+  *bgExecPtr = should_execute_in_background(tokens);
+  if (*bgExecPtr) {
+    argListLength--;
+  }
   
   // allocate memory for the arguments list
-  size_t argListLength = tokens_get_length(tokens);
   char **argList = (char **) malloc((argListLength + 1) * sizeof(char*));
   if (argList == NULL) {
     fprintf(stderr, "Failed to allocate memory\n");
@@ -91,14 +78,16 @@ int get_program_arguments(struct tokens *tokens, char ***argListPtr) {
  * @param tokens The command tokens
  * @param programNamePtr The address of the program name
  * @param argListPtr The address of the argument list
+ * @param bgExecPtr The address of the background execution flag
  * 
  * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int parse_tokens(struct tokens *tokens, char **programNamePtr, char ***argListPtr) {
+int parse_tokens(struct tokens *tokens, char **programNamePtr, char ***argListPtr, bool *bgExecPtr) {
   // edge cases
-  if (tokens == NULL || programNamePtr == NULL || argListPtr == NULL) {
+  if (tokens == NULL || programNamePtr == NULL || argListPtr == NULL || bgExecPtr == NULL) {
     *programNamePtr = NULL;
     *argListPtr = NULL;
+    *bgExecPtr = false;
     return -1;
   }
  
@@ -107,14 +96,16 @@ int parse_tokens(struct tokens *tokens, char **programNamePtr, char ***argListPt
   if (programName == NULL) {
     *programNamePtr = NULL;
     *argListPtr = NULL;
+    *bgExecPtr = false;
     return -1;
   }
   *programNamePtr = programName;
 
-  int result = get_program_arguments(tokens, argListPtr);
+  int result = get_program_arguments(tokens, argListPtr, bgExecPtr);
   if (result != 0) {
     *programNamePtr = NULL;
     *argListPtr = NULL;
+    *bgExecPtr = false;
     return -1;
   }
 

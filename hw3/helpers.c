@@ -117,7 +117,7 @@ void clean_string(char *string, int length) {
 }
 
 /**
- * Checks whether the tokens list is empty;
+ * Checks whether the tokens list is empty.
  * 
  * @param tokens The list of command tokens
  * 
@@ -131,6 +131,59 @@ int is_tokens_empty(struct tokens *tokens) {
 
   char *argument  = tokens_get_token(tokens, 0);
   if (argument == NULL) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+/**
+ * Checks whether the string is a non-negative integer.
+ * 
+ * @param string The string
+ * 
+ * @return int Returns the integer if the conversion is possible, or return -1
+ */
+int is_integer(const char *string) {
+  // edge cases
+  if (string == NULL) {
+    return -1;
+  }
+
+  // check that each of the character is a number
+  int argLength = strlen(string);
+  for (int index = 0; index < argLength; index++) {
+    if (!isdigit(string[index])) {
+      return -1;
+    }
+  }
+
+  int integer = atoi(string);
+  if (integer >= 0) {
+    return integer;
+  } else {
+    return -1;
+  }
+}
+
+/**
+ * Checks whether the program should be executed in the background. A program
+ * with the background execution flag always has the form "[command] &".
+ * 
+ * @param tokens The list of command tokens
+ * 
+ * @return int Returns 1 if there's the program should be executed in the
+ *             background, or 0 otherwise
+ */
+int should_execute_in_background(struct tokens *tokens) {
+  // edge cases
+  if (tokens == NULL) {
+    return 0;
+  }
+
+  size_t tokenLength = tokens_get_length(tokens);
+  char *argument = tokens_get_token(tokens, tokenLength - 1);
+  if (strcmp(argument, "&") == 0) {
     return 1;
   } else {
     return 0;

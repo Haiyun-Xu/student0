@@ -23,12 +23,13 @@ struct cmd_table {
 
 // built-in command description table
 struct cmd_table shellCommands = {
-  6,
+  7,
   {
     {cmd_help, "?", "show this help menu"},
     {cmd_exit, "exit", "exit the command shell"},
     {cmd_pwd, "pwd", "print the current working directory path"},
     {cmd_cd, "cd", "change the current working directory"},
+    {cmd_wait, "wait", "wait for all the background processes to exit"},
     {cmd_fg, "fg", "move a subprocess to the foreground"},
     {cmd_bg, "bg", "move a subprocess to the background"}
   }
@@ -37,7 +38,7 @@ struct cmd_table shellCommands = {
 /**
  * A built-in command of the shell. Brings up the help menu and prints a helpful description for the given command
  * 
- * @return int Returns 0 if successful, pr -1 otherwise
+ * @return int Returns 0 if successful, or -1 otherwise
  */
 int cmd_help(unused struct tokens *tokens) {
   for (unsigned int index = 0; index < shellCommands.numOfCommands; index++)
@@ -52,13 +53,14 @@ int cmd_help(unused struct tokens *tokens) {
  * @return void
  */
 int cmd_exit(unused struct tokens *tokens) {
+  destroy_process_list();
   exit(0);
 }
 
 /**
  * A built-in command of the shell. Prints the current working directory in the file system.
  * 
- * @return int Returns 0 if successful, pr -1 otherwise
+ * @return int Returns 0 if successful, or -1 otherwise
  */
 int cmd_pwd(unused struct tokens *tokens) {
   /*
@@ -87,7 +89,7 @@ int cmd_pwd(unused struct tokens *tokens) {
  * 
  * @param tokens The list of command arguments
  * 
- * @return int Returns 0 if successful, pr -1 otherwise
+ * @return int Returns 0 if successful, or -1 otherwise
  */
 int cmd_cd(struct tokens *tokens) {
   // edge cases
@@ -107,6 +109,41 @@ int cmd_cd(struct tokens *tokens) {
 }
 
 /**
+ * A built-in command of the shell. Wait untill all of the shell's background
+ * processes exited.
+ * 
+ * @return int Returns 0 if successful, or -1 otherwise
+ */
+int cmd_wait(struct tokens *tokens) {
+  /*
+   * since the shell process gets the `wait` command from the terminal,
+   * it must be in the foreground, and so all processes in the process list
+   * are in the background. Therefore, traverse through the process list and
+   * wait for each of the background processes
+   */
+  struct process_node *processNode = get_latest_process(), *exitedNode = NULL;
+
+  while (processNode != NULL) {
+    while (true) {
+      int processStatus = wait_till_pause_or_exit(processNode->processID);
+      /*
+       * break the loop if the waiting failed or the background process exited;
+       * otherwise, continue to wait for this process
+       */
+      if (processStatus == -1 || WIFEXITED(processStatus)) {
+        exitedNode = processNode;
+        break;
+      }
+    }
+
+    // get the next process node before removing the exited process node
+    processNode = get_next_process(processNode);
+    remove_process_node(exitedNode);
+  }
+  return 0;
+}
+
+/**
  * A built-in command of the shell. Moves a given process to the foreground.
  * 
  * @param tokens The list of command arguments
@@ -121,43 +158,62 @@ int cmd_fg(struct tokens *tokens) {
 
   pid_t processID = -1;
   if (tokens_get_length(tokens) > 1) {
-    /*
-     * if a second argument is given, it might be a subprocess ID.
-     * Validate that it is an integer.
-     */
     char *argument = tokens_get_token(tokens, 1);
-    int argLength = strlen(argument);
-    for (int index = 0; index < argLength; index++) {
-      if (!isdigit(argument[index])) {
-        fprintf(stderr, "First argument must be a process ID\n");
-        return -1;
-      }
+    processID = is_integer(argument);
+    if (processID == -1) {
+      fprintf(stderr, "First argument must be an integer process ID\n");
+      return -1;
     }
-    processID = atoi(argument);
   } else {
     /* 
      * if there's no second argument, move the most recent subprocess to
      * the foreground
      */
-    processID = get_latest_process();
+    struct process_node *processNode = get_latest_process();
+    if (processNode == NULL) {
+      return 0;
+    }
+    processID = processNode->processID;
   }
 
   /*
    * first set the subprocess's process group as the foreground, then
    * send a resume signal to the process, in case it was suspended
    */
-  int result = set_foreground_process(SHELL_INPUT_FILE_NUM, processID);
+  pid_t processGroupID = get_process_group(processID);
+  if (processGroupID == -1) {
+    fprintf(stderr, "Failed to find process\n");
+    return -1;
+  }
+  
+  int result = set_foreground_process_group(SHELL_INPUT_FILE_NUM, processID);
   if (result == -1) {
     fprintf(stderr, "Failed to move process to foreground\n");
     return -1;
   }
-
   start_process(processID);
+
+  /*
+   * similar to the shell, wait until the foreground process to pause or exit,
+   * then reclaim the foreground. If processes exited normally, also remove it
+   * from the process list
+   */
+  result = wait_till_pause_or_exit(processID);
+  if (result == -1) {
+    return -1;
+  } else if (WIFEXITED(result)) {
+    remove_process(processID);
+  }
+
+  result = set_foreground_process_group(SHELL_INPUT_FILE_NUM, get_process_group(get_process()));
+  if (result == -1) {
+    return -1;
+  }
   return 0;
 }
 
 /**
- * A built-in command of the shell. Moves a given process to the background.
+ * A built-in command of the shell. Resumes a paused background process.
  * 
  * @param tokens The list of command arguments
  * 
@@ -171,25 +227,19 @@ int cmd_bg(struct tokens *tokens) {
 
   pid_t processID = -1;
   if (tokens_get_length(tokens) > 1) {
-    /*
-     * if a second argument is given, it might be a subprocess ID.
-     * Validate that it is an integer.
-     */
     char *argument = tokens_get_token(tokens, 1);
-    int argLength = strlen(argument);
-    for (int index = 0; index < argLength; index++) {
-      if (!isdigit(argument[index])) {
-        fprintf(stderr, "First argument must be a process ID\n");
-        return -1;
-      }
+    processID = is_integer(argument);
+    if (processID == -1) {
+      fprintf(stderr, "First argument must be an integer process ID\n");
+      return -1;
     }
-    processID = atoi(argument);
   } else {
-    /* 
-     * if there's no second argument, move the most recent subprocess to
-     * the foreground
-     */
-    processID = get_latest_process();
+    // if there's no second argument, use the most recent subprocess
+    struct process_node *processNode = get_latest_process();
+    if (processNode == NULL) {
+      return 0;
+    }
+    processID = processNode->processID;
   }
 
   /*
@@ -198,8 +248,7 @@ int cmd_bg(struct tokens *tokens) {
    * group to the foreground, the shell will continue to be the foreground,
    * and we only have to make sure that the given background process was resumed
    */
-  start_process(processID);
-  return 0;
+  return start_process(processID);
 }
 
 /**

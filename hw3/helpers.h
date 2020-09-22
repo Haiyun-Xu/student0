@@ -8,6 +8,7 @@
 #ifndef HELPERS_H
 #define HELPERS_H
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,6 +65,26 @@ void clean_string(char *string, int length);
  * @return Returns 1 if the tokens list is empty, or 0 otherwise
  */
 int is_tokens_empty(struct tokens *tokens);
+
+/**
+ * Checks whether the string is a non-negative integer.
+ * 
+ * @param string The string
+ * 
+ * @return int Returns the integer if the conversion is possible, or return -1
+ */
+int is_integer(const char *string);
+
+/**
+ * Checks whether the program should be executed in the background. A program
+ * with the background execution flag always has the form "[command] &".
+ * 
+ * @param tokens The list of command tokens
+ * 
+ * @return int Returns 1 if there's the program should be executed in the
+ *             background, or 0 otherwise
+ */
+int should_execute_in_background(struct tokens *tokens);
 
 /**
  * Checks whether the file is executable.

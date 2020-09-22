@@ -118,20 +118,30 @@ int get_redirected_program_name(struct tokens *tokens, char **programNamePtr) {
  * 
  * The caller should own the heap memory and free it.
  * 
- * @param tokens The list of command tokens
+ * @param tokens The list of command arguments
  * @param argListPtr Address of a pointer to the list of program call arguments
+ * @param bgExecPtr Address of the background execution flag
  * 
  * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int get_redirected_program_argument(struct tokens *tokens, char ***argListPtr) {
+int get_redirected_program_argument(struct tokens *tokens, char ***argListPtr, bool *bgExecPtr) {
   // edge cases
   if (tokens == NULL || argListPtr == NULL) {
     *argListPtr = NULL;
     return -1;
   }
   
-  // count the number of program arguments in the command tokens
+  /*
+   * if the last argument is a background-execution flag, only parse the
+   * arguments before that
+   */
   size_t tokensLength = tokens_get_length(tokens);
+  *bgExecPtr = should_execute_in_background(tokens);
+  if (*bgExecPtr) {
+    tokensLength--;
+  }
+
+  // count the number of program arguments in the command tokens
   int argListLength = 0;
   char *token = NULL;
   for (size_t index = 0; index < tokensLength; index++) {
@@ -172,15 +182,17 @@ int get_redirected_program_argument(struct tokens *tokens, char ***argListPtr) {
  * @param programNamePtr The address of the program name
  * @param argListPtr The address of the argument list
  * @param fileNamePtr The address of the redirection file name
+ * @param bgExecPtr The address of the background execution flag
  * 
  * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int parse_redirection_tokens(struct tokens *tokens, char **programNamePtr, char ***argListPtr, char **fileNamePtr) {
+int parse_redirection_tokens(struct tokens *tokens, char **programNamePtr, char ***argListPtr, char **fileNamePtr, bool *bgExecPtr) {
   // edge cases
-  if (tokens == NULL || programNamePtr == NULL || argListPtr == NULL || fileNamePtr == NULL) {
+  if (tokens == NULL || programNamePtr == NULL || argListPtr == NULL || fileNamePtr == NULL || bgExecPtr == NULL) {
     *programNamePtr = NULL;
     *argListPtr = NULL;
     *fileNamePtr = NULL;
+    *bgExecPtr = false;
     return -1;
   }
 
@@ -195,14 +207,16 @@ int parse_redirection_tokens(struct tokens *tokens, char **programNamePtr, char 
     *programNamePtr = NULL;
     *argListPtr = NULL;
     *fileNamePtr = NULL;
+    *bgExecPtr = false;
     return -1;
   }
 
-  result = get_redirected_program_argument(tokens, argListPtr);
+  result = get_redirected_program_argument(tokens, argListPtr, bgExecPtr);
   if (result != 0) {
     *programNamePtr = NULL;
     *argListPtr = NULL;
     *fileNamePtr = NULL;
+    *bgExecPtr = false;
     return -1;
   }
 

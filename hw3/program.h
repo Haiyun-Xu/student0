@@ -16,40 +16,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "helpers.h"
 #include "tokenizer.h"
+#include "helpers.h"
 #include "shell_signal.h"
-
-/**
- * Checks whether the program should be executed in the background. A program
- * with the background execution flag always has the form "[command] &".
- * 
- * @param tokens The list of command tokens
- * 
- * @return int Returns 1 if there's the program should be executed in the background, or 0 if not
- */
-int should_exec_in_background(struct tokens *tokens);
-
-/**
- * Return the program name.
- * 
- * @param tokens The list of command tokens
- * 
- * @return char* The program name
- */
-char *get_program_name(struct tokens *tokens);
-
-/**
- * Get the program arguments from the command.
- * The program arguments are not newly-allocated, but the pointer array to the program arguments is.
- * Caller should own the heap memory and free it.
- * 
- * @param tokens The list of command arguments
- * @param argListPtr The address of an argument list
- * 
- * @return int Returns 0 if the parsing succeeded, or -1 if failed
- */
-int get_program_arguments(struct tokens *tokens, char ***argListPtr);
 
 /**
  * Parse the command tokens into a program name and an argument list. The
@@ -61,10 +30,11 @@ int get_program_arguments(struct tokens *tokens, char ***argListPtr);
  * @param tokens The command tokens
  * @param programNamePtr The address of the program name
  * @param argListPtr The address of the argument list
+ * @param bgExecPtr The address of the background execution flag
  * 
  * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int parse_tokens(struct tokens *tokens, char **programNamePtr, char ***argListPtr);
+int parse_tokens(struct tokens *tokens, char **programNamePtr, char ***argListPtr, bool *bgExecPtr);
 
 /**
  * Execute the given program with the given arguments. The subprocess will

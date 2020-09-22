@@ -283,10 +283,11 @@ int get_piped_program_names(struct tokens *tokens, char ***programNamesPtr) {
  * 
  * @param tokens The list of command tokens
  * @param programArgListsPtr The address of an array of argument lists
+ * @param bgExecPtr The address of the background execution flag
  * 
  * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int get_piped_program_arguments(struct tokens *tokens, char ****programArgListsPtr) {
+int get_piped_program_arguments(struct tokens *tokens, char ****programArgListsPtr, bool *bgExecPtr) {
   // edge cases
   if (tokens == NULL || programArgListsPtr == NULL) {
     *programArgListsPtr = NULL;
@@ -313,9 +314,18 @@ int get_piped_program_arguments(struct tokens *tokens, char ****programArgListsP
   argListLengths[numOfProcesses] = -1;
 
   /*
-   * record the length of each argument list
+   * if the last argument is a background-execution flag, only parse the
+   * arguments before that
    */
   size_t tokensLength = tokens_get_length(tokens);
+  *bgExecPtr = should_execute_in_background(tokens);
+  if (*bgExecPtr) {
+    tokensLength--;
+  }
+
+  /*
+   * record the length of each argument list
+   */
   for (int argListIndex = 0, startIndex = -1, finishIndex = 0; finishIndex < tokensLength; finishIndex++) {
     char *token = tokens_get_token(tokens, finishIndex);
     if (is_pipe_symbol(token)) {
@@ -403,14 +413,16 @@ int get_piped_program_arguments(struct tokens *tokens, char ****programArgListsP
  * @param tokens The list of command tokens
  * @param programNamesPtr The address of the program name array
  * @param argListsPtr The address of the argument lists array
+ * @param bgExecPtr The address of the background execution flag
  * 
  * @return int Returns 0 if the parsing succeeded, or -1 if failed
  */
-int parse_piping_tokens(struct tokens *tokens, char ***programNamesPtr, char ****argListsPtr) {
+int parse_piping_tokens(struct tokens *tokens, char ***programNamesPtr, char ****argListsPtr, bool *bgExecPtr) {
   // edge cases
-  if (tokens == NULL || programNamesPtr == NULL || argListsPtr == NULL) {
+  if (tokens == NULL || programNamesPtr == NULL || argListsPtr == NULL || bgExecPtr == NULL) {
     *programNamesPtr = NULL;
     *argListsPtr = NULL;
+    *bgExecPtr = false;
     return -1;
   }
 
@@ -422,14 +434,16 @@ int parse_piping_tokens(struct tokens *tokens, char ***programNamesPtr, char ***
   if (result != 0) {
     *programNamesPtr = NULL;
     *argListsPtr = NULL;
+    *bgExecPtr = false;
     return -1;
   }
 
-  result = get_piped_program_arguments(tokens, argListsPtr);
+  result = get_piped_program_arguments(tokens, argListsPtr, bgExecPtr);
   if (result != 0) {
     free_program_names(*programNamesPtr);
     *programNamesPtr = NULL;
     *argListsPtr = NULL;
+    *bgExecPtr = false;
     return -1;
   }
 

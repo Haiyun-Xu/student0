@@ -100,36 +100,31 @@ int reset_ignored_signals() {
 }
 
 /**
- * Handle the SIGCHLD signal.
+ * Configures the current process to handle SIG_CHLD customarily.
  * 
- * This handler should be assigned to the "sa_signaction" field of the
- * sigaction struct, and is only used if the SA_SIGINFO flag is specified
- * in the "sigaction.sa_flags" field during the handler registration via
- * sigaction(). The SA_NOCLDSTOP flag should also be specified in the
- * "sigaction.sa_flags" field, so that the handler is not triggered for
- * pausing/resuming events.
- * 
- * @param signalNum The numeric identifier of the signal
- * @param signalInfo A structure containing signal info
- * @param signalContext A structure containing signal context (not used)
- * 
- * @return void
+ * @return int Returns 0 if successful, or -1 otherwise
  */
-void handle_sigchld(int signalNum, siginfo_t *signalInfo, void *signalContext) {
-  /**
-   * as part of the shell's processs management, child processes that
-   * have exited must be removed from the shell's process list. However,
-   * the shell cannot be waiting all the time for the child processes to
-   * exit, so thie removal from the process list must be done passively
-   * via a handler to the SIGCHLD signal
-   * 
-   * And since this custom handler is used in place of the default behavior,
-   * we must reap the process by calling wait() on that process
+int handle_sigchld() {
+  /*
+   * Since a terminated background subprocess should be removed from the process
+   * list by the shell process (via synchronous, non-blocking waiting), the
+   * terminated subprocess must be kept in the zombie state and not reaped by
+   * the SIG_CHLD handler.
    */
-  pid_t processID = signalInfo->si_pid;
-  waitpid(processID, NULL, 0);
-  remove_process(processID);
-  return;
+  struct sigaction sigAction;
+  sigAction.sa_handler = signal_ignorer;
+  /*
+   * SA_NOCLDSTOP: do not send signal if the child process was stopped;
+   * SA_RESTART: SIG_CLD shouldn't fail a syscall, so restart the interrupted syscall
+   */
+  sigAction.sa_flags = SA_NOCLDSTOP|SA_RESTART;
+
+  int result = sigaction(SIGCHLD, &sigAction, NULL);
+  if (result == -1) {
+    perror("Failed to register signal handler: ");
+    return -1;
+  }
+  return 0;
 }
 
 /**
@@ -145,5 +140,11 @@ int register_shell_signal_handlers() {
   if (result == -1) {
     return -1;
   }
+  result = handle_sigchld();
+  if (result == -1) {
+    return -1;
+  }
+  
+  // handle 
   return 0;
 }

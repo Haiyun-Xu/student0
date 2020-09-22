@@ -24,6 +24,7 @@
 #include "program.h"
 #include "program_piping.h"
 #include "program_redirection.h"
+#include "process_list.h"
 #include "process_management.h"
 
 /**
@@ -124,6 +125,7 @@ int execute_commandline(struct tokens *tokens) {
   int syntax = 0;
   pid_t *subprocessIDs = NULL;
   bool backgroundExecution = false;
+
   if (is_tokens_empty(tokens)) {
     /*
      * if the user sent a signal through the terminal, or if the command
@@ -135,7 +137,7 @@ int execute_commandline(struct tokens *tokens) {
   } else if ((syntax = contains_redirection(tokens))) {
     // extract the program name, program arguments, and redirection file name
     char *programName = NULL, **argList = NULL, *fileName = NULL;
-    int result = parse_redirection_tokens(tokens, &programName, &argList, &fileName);
+    int result = parse_redirection_tokens(tokens, &programName, &argList, &fileName, &backgroundExecution);
     if (result != 0) {
       fprintf(stderr, "Failed to parse program name and arguments from command line\n");
       return -1;
@@ -146,7 +148,7 @@ int execute_commandline(struct tokens *tokens) {
   } else if (contains_piping(tokens)) {
     // extract the program names amd program argument lists
     char **programNames = NULL, ***argLists = NULL;
-    int result = parse_piping_tokens(tokens, &programNames, &argLists);
+    int result = parse_piping_tokens(tokens, &programNames, &argLists, &backgroundExecution);
     if (result != 0) {
       fprintf(stderr, "Failed to parse program name and arguments from command line\n");
       return -1;
@@ -160,25 +162,15 @@ int execute_commandline(struct tokens *tokens) {
      * built-in command, or run the program;
      */
     command_t *shellCommand = NULL;
-    if ((shellCommand = shell_command_lookup(get_program_name(tokens))) != NULL) {
+    if ((shellCommand = shell_command_lookup(tokens_get_token(tokens, 0))) != NULL) {
       return shellCommand(tokens);
     } else {
       // extract the program name and arguments
       char *programName = NULL, **argList = NULL;
-      int result = parse_tokens(tokens, &programName, &argList);
+      int result = parse_tokens(tokens, &programName, &argList, &backgroundExecution);
       if (result != 0) {
         fprintf(stderr, "Failed to parse program name and arguments from command line\n");
         return -1;
-      }
-
-      /*
-       * check whether the program should be executed in the background;
-       * if so, remove the background-execution flag from the argument list
-       */
-      backgroundExecution = should_exec_in_background(tokens);
-      if (backgroundExecution) {
-        int lastArgIndex = tokens_get_length(tokens) - 1;
-        argList[lastArgIndex] = NULL;
       }
 
       // execute the program
@@ -192,7 +184,7 @@ int execute_commandline(struct tokens *tokens) {
   }
   
   // wait till the subprocesses have completed
-  int status = manage_shell_subprocesses(subprocessIDs, SHELL_INPUT_FILE_NUM, SHELL_OUTPUT_FILE_NUM, backgroundExecution);
+  int status = manage_shell_subprocesses(subprocessIDs, backgroundExecution);
   free(subprocessIDs);
   return status;
 }
@@ -248,12 +240,18 @@ int main(unused int argc, unused char *argv[]) {
     read(SHELL_INPUT_FILE_NUM, line, COMMAND_LINE_LENGTH);
     if (errno == EINTR) {
       write(SHELL_OUTPUT_FILE_NUM, "\n", 2);
+      /*
+       * remember to clear the errno, otherwise a successful read that does
+       * not reset the errno would still trigger this condition
+       */
+      errno = 0;
     }
     tokens = tokenize(line);
     clean_string(line, COMMAND_LINE_LENGTH);
     execute_commandline(tokens);
     tokens_destroy(tokens);
   }
+  
   // this should never be reached
   return 0;
 }
