@@ -1,128 +1,257 @@
+/**
+ * This module contains a simple shell program that supports built-in commands,
+ * executable programs, and job control.
+ * 
+ * @author Haiyun Xu <xuhaiyunhenry@gmail.com>
+ * @copyright MIT
+ */
+
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
 #include <sys/types.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <termios.h>
 #include <unistd.h>
 
+#include "shell_command.h"
+#include "shell_config.h"
+#include "shell_signal.h"
 #include "tokenizer.h"
+#include "program.h"
+#include "program_piping.h"
+#include "program_redirection.h"
+#include "process_list.h"
+#include "process_management.h"
 
-/* Convenience macro to silence compiler warnings about unused function parameters. */
-#define unused __attribute__((unused))
+/**
+ * Intialize the shell process. This includes setting the shell process group
+ * as the foreground, and registering the signal handlers.
+ * 
+ * @return int Return 0 if successful, or -1 otherwise
+ */
+int initialize_shell() {
+  // The shell should use stdin/stdout as the I/O file descriptors.
+  SHELL_INPUT_FILE_NUM = STDIN_FILENO;
+  SHELL_OUTPUT_FILE_NUM = STDOUT_FILENO;
 
-/* Whether the shell is connected to an actual terminal or not. */
-bool shell_is_interactive;
+  /*
+   * Check if the shell is running interactively, i.e. if the input file
+   * descriptor is an open, terminal descriptor
+   */
+  shellIsInteractive = isatty(SHELL_INPUT_FILE_NUM);
 
-/* File descriptor for the shell input */
-int shell_terminal;
+  /*
+   * If the shell is using the terminal as its input file descriptor, then
+   * the shell process must be in the foreground process group of the terminal
+   * descriptor; otherwise it will not be able to read from the terminal
+   * and will be stopped by the SIGTTIN signal 
+   */
+  if (shellIsInteractive) {
+    /*
+     * If the shell process is currently not in the foreground process group,
+     * it will not be able to use the terminal, and so must pause its
+     * execution and wait for its turn.
+     * 
+     * We detect whether the shell is in the foreground by checking the ID
+     * of the foreground process group associated with the terminal. And we
+     * pause the shell's execution by putting its process group into the
+     * background via a SIGTTIN signal.
+     * 
+     * When the shell process group gets promoted to the foreground process
+     * group, it will receive a SIGCONT and can continue to execute
+     */
+    do {
+      shellProcessGroupID = getpgrp();
+      int foregroundProcessGroupID = tcgetpgrp(SHELL_INPUT_FILE_NUM);
+      if (shellProcessGroupID != foregroundProcessGroupID) {
+        // suspends all processes in the shell's process group
+        kill(-shellProcessGroupID, SIGTTIN);
+      } else {
+        break;
+      }
+    } while (true);
 
-/* Terminal mode settings for the shell */
-struct termios shell_tmodes;
+    /*
+     * the shell's process group should now be the foreground process group
+     * of the terminal, so make the shell process the foreground process?
+     */
+    shellProcessGroupID = getpid();
+    tcsetpgrp(SHELL_INPUT_FILE_NUM, shellProcessGroupID);
 
-/* Process group id for the shell */
-pid_t shell_pgid;
-
-int cmd_exit(struct tokens *tokens);
-int cmd_help(struct tokens *tokens);
-
-/* Built-in command functions take token array (see parse.h) and return int */
-typedef int cmd_fun_t(struct tokens *tokens);
-
-/* Built-in command struct and lookup table */
-typedef struct fun_desc {
-  cmd_fun_t *fun;
-  char *cmd;
-  char *doc;
-} fun_desc_t;
-
-fun_desc_t cmd_table[] = {
-  {cmd_help, "?", "show this help menu"},
-  {cmd_exit, "exit", "exit the command shell"},
-};
-
-/* Prints a helpful description for the given command */
-int cmd_help(unused struct tokens *tokens) {
-  for (unsigned int i = 0; i < sizeof(cmd_table) / sizeof(fun_desc_t); i++)
-    printf("%s - %s\n", cmd_table[i].cmd, cmd_table[i].doc);
-  return 1;
-}
-
-/* Exits this shell */
-int cmd_exit(unused struct tokens *tokens) {
-  exit(0);
-}
-
-/* Looks up the built-in command, if it exists. */
-int lookup(char cmd[]) {
-  for (unsigned int i = 0; i < sizeof(cmd_table) / sizeof(fun_desc_t); i++)
-    if (cmd && (strcmp(cmd_table[i].cmd, cmd) == 0))
-      return i;
-  return -1;
-}
-
-/* Intialization procedures for this shell */
-void init_shell() {
-  /* Our shell is connected to standard input. */
-  shell_terminal = STDIN_FILENO;
-
-  /* Check if we are running interactively */
-  shell_is_interactive = isatty(shell_terminal);
-
-  if (shell_is_interactive) {
-    /* If the shell is not currently in the foreground, we must pause the shell until it becomes a
-     * foreground process. We use SIGTTIN to pause the shell. When the shell gets moved to the
-     * foreground, we'll receive a SIGCONT. */
-    while (tcgetpgrp(shell_terminal) != (shell_pgid = getpgrp()))
-      kill(-shell_pgid, SIGTTIN);
-
-    /* Saves the shell's process id */
-    shell_pgid = getpid();
-
-    /* Take control of the terminal */
-    tcsetpgrp(shell_terminal, shell_pgid);
-
-    /* Save the current termios to a variable, so it can be restored later. */
-    tcgetattr(shell_terminal, &shell_tmodes);
+    // Save the current termios to a variable, so it can be restored later.
+    tcgetattr(SHELL_INPUT_FILE_NUM, &shell_tmodes);
   }
+
+  /*
+   * once the shell is in the teletype's foreground process group, its signal
+   * handlers can be configured. These custom signal handlers help the shell
+   * process ignore insignificant signals and maintain the subprocesses list,
+   * which we also initialize here
+   */
+  int result = 0;
+  result = register_shell_signal_handlers();
+  if (result == -1) {
+    return -1;
+  }
+
+  result = initialize_process_list();
+  if (result == -1) {
+    return -1;
+  }
+
+  return 0;
 }
 
-int main(unused int argc, unused char *argv[]) {
-  init_shell();
+/**
+ * Interpret and run the command line arguments.
+ * 
+ * @param tokens The list of command arguments
+ * 
+ * @return int Returns 0 if the command line ran successfully, or -1 otherwise
+ */
+int execute_commandline(struct tokens *tokens) {
+  // edge cases
+  if (tokens == NULL)
+    return -1;
 
-  static char line[4096];
-  int line_num = 0;
+  /*
+   * check the command line syntax, and execute it in different mode based on
+   * its syntax: input/output redirect, piping, and command/program call.
+   */
+  int syntax = 0;
+  pid_t *subprocessIDs = NULL;
+  bool backgroundExecution = false;
 
-  /* Please only print shell prompts when standard input is not a tty */
-  if (shell_is_interactive)
-    fprintf(stdout, "%d: ", line_num);
+  if (is_tokens_empty(tokens)) {
+    /*
+     * if the user sent a signal through the terminal, or if the command
+     * starts with a newline character, the command tokens will be empty,
+     * and the shell should return right away
+     */
+    return 0;
 
-  while (fgets(line, 4096, stdin)) {
-    /* Split our line into words. */
-    struct tokens *tokens = tokenize(line);
+  } else if ((syntax = contains_redirection(tokens))) {
+    // extract the program name, program arguments, and redirection file name
+    char *programName = NULL, **argList = NULL, *fileName = NULL;
+    int result = parse_redirection_tokens(tokens, &programName, &argList, &fileName, &backgroundExecution);
+    if (result != 0) {
+      fprintf(stderr, "Failed to parse program name and arguments from command line\n");
+      return -1;
+    }
+    // execute the redirected program
+    subprocessIDs = execute_redirected_program(programName, argList, syntax, fileName); /** TODO: remember to free this */
 
-    /* Find which built-in function to run. */
-    int fundex = lookup(tokens_get_token(tokens, 0));
+  } else if (contains_piping(tokens)) {
+    // extract the program names amd program argument lists
+    char **programNames = NULL, ***argLists = NULL;
+    int result = parse_piping_tokens(tokens, &programNames, &argLists, &backgroundExecution);
+    if (result != 0) {
+      fprintf(stderr, "Failed to parse program name and arguments from command line\n");
+      return -1;
+    }
+    // execute the piped program
+    subprocessIDs = execute_piped_program((const char **) programNames, (const char ***) argLists); /** TODO: remember to free this */
 
-    if (fundex >= 0) {
-      cmd_table[fundex].fun(tokens);
+  } else {
+    /*
+     * if the command line has no special syntax, then either find and run the
+     * built-in command, or run the program;
+     */
+    command_t *shellCommand = NULL;
+    if ((shellCommand = shell_command_lookup(tokens_get_token(tokens, 0))) != NULL) {
+      return shellCommand(tokens);
     } else {
-      /* REPLACE this to run commands as programs. */
-      fprintf(stdout, "This shell doesn't know how to run programs.\n");
+      // extract the program name and arguments
+      char *programName = NULL, **argList = NULL;
+      int result = parse_tokens(tokens, &programName, &argList, &backgroundExecution);
+      if (result != 0) {
+        fprintf(stderr, "Failed to parse program name and arguments from command line\n");
+        return -1;
+      }
+
+      // execute the program
+      subprocessIDs = execute_program(programName, argList); /** TODO: remember to free this */
+    }
+  }
+
+  if (subprocessIDs == NULL) {
+    fprintf(stderr, "Failed to execute\n");
+    return -1;
+  }
+  
+  // wait till the subprocesses have completed
+  int status = manage_shell_subprocesses(subprocessIDs, backgroundExecution);
+  free(subprocessIDs);
+  return status;
+}
+
+/**
+ * The shell program.
+ */
+int main(unused int argc, unused char *argv[]) {
+  int status = initialize_shell();
+  if (status == -1) {
+    fprintf(stderr, "Failed to initialize the shell\n");
+    exit(1);
+  }
+
+  static char line[COMMAND_LINE_LENGTH];
+  struct tokens *tokens = NULL;
+  int lineNumber = 0;
+
+  // the loop should never terminate, unless the exit() command is executed
+  while (true) {
+    // only print shell prompts when standard input is not a tty
+    if (shellIsInteractive) {
+      fprintf(stdout, "%d: ", lineNumber++);
+      fflush(stdout);
     }
 
-    if (shell_is_interactive)
-      /* Please only print shell prompts when standard input is not a tty */
-      fprintf(stdout, "%d: ", ++line_num);
-
-    /* Clean up memory */
+    /*
+     * The ideal behavior of the shell should be as follows:
+     * 1) the shell disables SA_RESTART when registering the signal handlers,
+     * such that signal-interrupted system calls are not restarted;
+     * 2) whenever the shell is blocked and reading user input, if user types
+     * a special signal-generating character, the terminal will send that
+     * signal to the shell;
+     * 3) the execution jumps from the system call to the signal handler,
+     * which ignores the signal and returns the control back to the system
+     * call;
+     * 4) since SA_RESTART was disabled, the system call should just return to
+     * user code, WITHOUT restarting the system call;
+     * 5) the shell process should check the line returned, and move onto the
+     * next line if the line was incomplete or if the errno was set to EINTR;
+     * 
+     * Note that, somehow we must implement our own signal ignorer instead of
+     * using SIG_IGN, or else the read syscall always gets retried.
+     * 
+     * The only problem with this method is that, when fgets() returns due
+     * to interruption, its line buffer still contains the command from last
+     * run. We deal with this by overwriting the line buffer with null chars
+     * everytime the line is parsed into tokens.
+     * 
+     * Here we read the command line, split the command program call into
+     * arguments, execute the program call, and clean up the arguments
+     */
+    read(SHELL_INPUT_FILE_NUM, line, COMMAND_LINE_LENGTH);
+    if (errno == EINTR) {
+      write(SHELL_OUTPUT_FILE_NUM, "\n", 2);
+      /*
+       * remember to clear the errno, otherwise a successful read that does
+       * not reset the errno would still trigger this condition
+       */
+      errno = 0;
+    }
+    tokens = tokenize(line);
+    clean_string(line, COMMAND_LINE_LENGTH);
+    execute_commandline(tokens);
     tokens_destroy(tokens);
   }
-
+  
+  // this should never be reached
   return 0;
 }
