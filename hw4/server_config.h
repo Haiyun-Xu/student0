@@ -33,6 +33,9 @@ int SERVER_PROXY_PORT = 80;
 // length of the server socket connection backlog
 int SERVER_CONNECTION_BACKLOG_LENGTH = 1024;
 
+// initial size of the buffer in bytes
+int INITIAL_BUFFER_SIZE = 1024;
+
 // only used by poolserver
 wq_t WORK_QUEUE;
 int NUM_THREADS = 0;

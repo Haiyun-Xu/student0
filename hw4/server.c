@@ -14,26 +14,164 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <unistd.h>
 
 #include "server_config.h"
 #include "server_signal.h"
 #include "libhttp.h"
 #include "wq.h"
 
-/*
- * Serves the contents the file stored at `path` to the client socket `fd`.
- * It is the caller's reponsibility to ensure that the file stored at `path` exists.
+/**
+ * Read all the content from the file descriptor into the buffer.
+ * 
+ * @param fd The file descriptor
+ * @param bufferPtr Pointer to the buffer, terminated with a null-char
+ * 
+ * @return The number of bytes read into the buffer
  */
-void serve_file(int fd, char *path) {
+int read_all(int fd, char **bufferPtr) {
+  // edge cases
+  if (fd < 0 || bufferPtr == NULL) {
+    return 0;
+  }
 
-  http_start_response(fd, 200);
-  http_send_header(fd, "Content-Type", http_get_mime_type(path));
-  http_send_header(fd, "Content-Length", "0"); // Change this too
-  http_end_headers(fd);
+  int bufferSize = INITIAL_BUFFER_SIZE;
+  char *buffer = (char *) malloc(bufferSize);
+  int bytesRead = 0, totalBytesRead = 0, bytesLeftInBuffer = bufferSize - totalBytesRead;
 
-  /* TODO: PART 2 */
+  // iteratively read the fd content into the buffer, until no more bytes are read
+  do {
+    totalBytesRead += bytesRead;
 
+    // if the buffer has become full, double the buffer size
+    if (totalBytesRead == bufferSize) {
+      bufferSize *= 2;
+      char *tempPtr = (char *) realloc(buffer, bufferSize);
+
+      // if we failed to expand the buffer, end the function
+      if (tempPtr == NULL) {
+        printf("Failed to allocate enough memory to file buffer\n");
+        free(buffer);
+        *bufferPtr = NULL;
+        return 0;
+
+        // else, use the new buffer
+      } else {
+        buffer = tempPtr;
+      }
+    }
+
+    bytesLeftInBuffer = bufferSize - totalBytesRead;
+    bytesRead = read(fd, buffer + totalBytesRead, bytesLeftInBuffer);
+
+    // if the read failed, free the buffer and abort
+    if (bytesRead == -1) {
+      perror("Failed to read from file descriptor: ");
+      free(buffer);
+      *bufferPtr = NULL;
+      return 0;
+    }
+  } while (bytesRead > 0);
+
+  // terminate the buffer with a null-char
+  buffer[totalBytesRead] = '\0';
+  *bufferPtr = buffer;
+  return totalBytesRead;
+}
+
+/**
+ * Write all the content from the buffer into the file descriptor.
+ * NOTE: this function does not free the buffer
+ * 
+ * @param fd The file descriptor
+ * @param buffer The buffer, terminated with a null-char
+ * @param bufferSize Size of the buffer in bytes
+ * 
+ * @return The number of bytes written into the file descriptor
+ */
+int write_all(int fd, char *buffer, int bufferSize) {
+  // edge cases
+  if (fd < 0 || buffer == NULL || bufferSize <= 0) {
+    return 0;
+  }
+
+  int bytesLeftToWrite = bufferSize;
+  int bytesWritten = 0, totalBytesWritten = 0;
+
+  do {
+    bytesWritten = write(fd, buffer, bytesLeftToWrite);
+    // if the write failed, return the total number of written bytes and abort
+    if (bytesWritten == -1) {
+      perror("Failed to write to file description: ");
+      return totalBytesWritten;
+    }
+
+    totalBytesWritten += bytesWritten;
+    bytesLeftToWrite = bufferSize - totalBytesWritten;
+  } while (bytesLeftToWrite > 0);
+  
+  return totalBytesWritten;
+}
+
+/**
+ * Return a failure response to the client.
+ * 
+ * @param connectSocketFD The connection socket file descriptor
+ * @param httpCode The failure HTTP code
+ */
+void send_failure_response(int connectSocketFD, int httpCode) {
+  http_start_response(connectSocketFD, httpCode);
+  http_send_header(connectSocketFD, "Content-Type", "text/html");
+  http_end_headers(connectSocketFD);
+  close(connectSocketFD);
+  return;
+}
+
+/**
+ * Serves the contents of the file stored at `path` to the client.
+ * The file stored at `path` should exist.
+ * 
+ * @param connectSocketFD The connection socket file descriptor
+ * @param path The path of the file to be served
+ */
+void serve_file(int connectSocketFD, char *path) {
+  // edge cases
+  if (connectSocketFD < 0 || path == NULL) {
+    return;
+  }
+
+  char *buffer = NULL; /** TODO: free this */
+  int fileDescriptor = open(path, O_RDONLY);
+  int bufferSize = read_all(fileDescriptor, &buffer);
+  close(fileDescriptor);
+
+  /*
+   * if we failed to read the entire file content into buffer, it's the
+   * server's fault
+   */
+  if (bufferSize == 0) {
+    return send_failure_response(connectSocketFD, 500);
+  }
+
+  /*
+   * the C int (unsigned int) is 4 bytes and can express at most
+   * 2,147,483,647 (4,294,967,295), which is 11 bytes (including the null-char)
+   */
+  char contentLength[11];
+  sprintf(contentLength, "%d", bufferSize);
+
+  // start sending the response line and header lines
+  http_start_response(connectSocketFD, 200);
+  http_send_header(connectSocketFD, "Content-Type", http_get_mime_type(path));
+  http_send_header(connectSocketFD, "Content-Length", contentLength);
+  http_end_headers(connectSocketFD);
+  
+  // send the response body
+  if (write_all(connectSocketFD, buffer, bufferSize) != bufferSize) {
+    fprintf(stderr, "Failed to write all content into response\n");
+  }
+
+  free(buffer);
+  return;
 }
 
 void serve_directory(int fd, char *path) {
@@ -45,57 +183,111 @@ void serve_directory(int fd, char *path) {
 
 }
 
-
-/*
- * Reads an HTTP request from client socket (fd), and writes an HTTP response
- * containing:
- *
+/**
+ * Reads an HTTP request from the connection socket, and writes an HTTP
+ * response containing:
  *   1) If user requested an existing file, respond with the file
  *   2) If user requested a directory and index.html exists in the directory,
  *      send the index.html file.
  *   3) If user requested a directory and index.html doesn't exist, send a list
  *      of files in the directory with links to each.
  *   4) Send a 404 Not Found response.
- *
- *   Closes the client socket (fd) when finished.
+ * Closes the connection socket when finished.
+ * 
+ * @param connectSocketFD The connection socket file descriptor
  */
-void handle_files_request(int fd) {
-
-  struct http_request *request = http_request_parse(fd);
-
-  if (request == NULL || request->path[0] != '/') {
-    http_start_response(fd, 400);
-    http_send_header(fd, "Content-Type", "text/html");
-    http_end_headers(fd);
-    close(fd);
+void handle_files_request(int connectSocketFD) {
+  // edge cases
+  if (connectSocketFD < 0) {
     return;
   }
 
-  if (strstr(request->path, "..") != NULL) {
-    http_start_response(fd, 403);
-    http_send_header(fd, "Content-Type", "text/html");
-    http_end_headers(fd);
-    close(fd);
-    return;
-  }
-
-  /* Remove beginning `./` */
-  char *path = malloc(2 + strlen(request->path) + 1);
-  path[0] = '.';
-  path[1] = '/';
-  memcpy(path + 2, request->path, strlen(request->path) + 1);
-
+  struct http_request *request = http_request_parse(connectSocketFD);
   /*
-   * TODO: PART 2 is to serve files. If the file given by `path` exists,
-   * call serve_file() on it. Else, serve a 404 Not Found error below.
-   * The `stat()` syscall will be useful here.
-   *
+   * if the request cannot be parsed or if the path does not start with '/',
+   * then a bad request was received
+   */
+  if (request == NULL || request->path[0] != '/') {
+    return send_failure_response(connectSocketFD, 400);
+    /*
+     * else if the requested path ever returns to the parent directory,
+     * then we forbid the request from accessing that file
+     */
+  } else if (strstr(request->path, "..") != NULL) {
+    return send_failure_response(connectSocketFD, 403);
+    /*
+     * else, check if the method and path are valid, and maybe serve the path
+     */
+  } else {
+    // remove the trailing forward slash, and make the path relative
+    if (request->path[strlen(request->path) - 1] == '/') {
+      request->path[strlen(request->path) - 1] = '\0';
+    }
+    char *path = malloc(1 + strlen(request->path) + 1); /** TODO: free this */
+    path[0] = '.';
+    memcpy(path + 1, request->path, strlen(request->path) + 1);
+
+    // check if the method is valid
+    if (strcmp("GET", request->method) != 0) {
+      send_failure_response(connectSocketFD, 405);
+    } else {
+      struct stat fileStatus;
+      /*
+      * if we failed to retrieve the file status, then reply that the path was
+      * not found
+      */ 
+      if (stat(path, &fileStatus) == -1) {
+        fprintf(stderr, "Failed to find path: %s\n", path);
+        perror(NULL);
+        send_failure_response(connectSocketFD, 404);
+        /*
+        * else if the path is a directory, either serve the index.html file
+        * (if it exists), or reply that the path was not found
+        */
+      } else if (S_ISDIR(fileStatus.st_mode)) {
+        // construct the path of the index file
+        char *indexFileName = "/index.html";
+        int totalLength = strlen(path) + strlen(indexFileName) + 1;
+        char *indexFilePath = (char *) malloc(totalLength); /** TODO: free this */
+        snprintf(indexFilePath, totalLength, "%s/index.html", path);
+
+        struct stat indexFileStatus;
+        /*
+        * if there is an index.html file in the path, serve it
+        */
+        if (stat(indexFilePath, &indexFileStatus) != -1 && S_ISREG(indexFileStatus.st_mode)) {
+          serve_file(connectSocketFD, indexFilePath);
+          /*
+          * else, there is no index.html in the directory, and we don't serve
+          * directories yet, so reply that the path is not found
+          */
+        } else {
+          send_failure_response(connectSocketFD, 404);
+        }
+        free(indexFilePath);
+        /*
+        * else if the path is a regular file, serve it
+        */
+      } else if (S_ISREG(fileStatus.st_mode)) {
+        serve_file(connectSocketFD, path);
+        /*
+        * else, the requested path was not a valid file or directory,
+        * so reply that the path was not found
+        */
+      } else {
+        fprintf(stderr, "Path is not directory or file: %s\n", path);
+        perror(NULL);
+        send_failure_response(connectSocketFD, 404);
+      }
+    }
+    free(path);
+  }
+  /*
    * TODO: PART 3 is to serve both files and directories. You will need to
    * determine when to call serve_file() or serve_directory() depending
    * on `path`. Make your edits below here in this function.
    */
-
-  close(fd);
+  close(connectSocketFD);
   return;
 }
 
@@ -291,10 +483,11 @@ void parse_commands(const int argc, char **argv) {
 /**
  * Change the server process's working directory.
  * 
- * NOTE: there is no internal restriction on what directories can be
+ * NOTE: there is no internal restriction on which directories can be
  * accessed, but the server should only serve files within the
- * "/home/vagrant/code/personal/hw4" directory, so just always pass
- * the correct directory in the command line.
+ * "/home/vagrant/code/personal/hw4/www" directory. Since the server is
+ * already in the hw4 directory, the server starter command must always
+ * specify either ./www or ./www/my_documents as the starting directory
  */
 void change_working_directory() {
   chdir(SERVER_FILE_PATH);
@@ -409,7 +602,7 @@ void serve_forever(int *serverSocketFD, void (*requestHandler)(int)) {
   // continuously accept connection requests and handle client connections
   while (true) {
     // block and wait for connection request through the server socket
-    connectSocketFD = accept( *serverSocketFD, (struct sockaddr *) &clientAddress, (socklen_t *) &clientAddressLen);
+    connectSocketFD = accept(*serverSocketFD, (struct sockaddr *) &clientAddress, (socklen_t *) &clientAddressLen);
     if (connectSocketFD == -1) {
       perror("Error accepting connection request");
       continue;
@@ -422,7 +615,7 @@ void serve_forever(int *serverSocketFD, void (*requestHandler)(int)) {
      * This is a single-process, single-threaded HTTP server.
      * When a client connection has been accepted, the main
      * process sends a response to the client. During this
-     * time, the server does not listen and accept connections.
+     * time, the server does not listen or accept connections.
      * Only after a response has been sent to the client can
      * the server accept a new connection.
      */
@@ -483,7 +676,7 @@ int main(int argc, char **argv) {
   // parse the commandline and populate the global variables with arguments
   parse_commands(argc, argv);
 
-  // if the server is run in file mode, chnge the process's working directory
+  // if the server is run in file mode, change the process's working directory
   if (REQUEST_HANDLER == handle_files_request) {
     change_working_directory();
   }
