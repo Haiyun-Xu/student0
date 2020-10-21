@@ -49,7 +49,7 @@ int read_all(int fd, char **bufferPtr) {
 
       // if we failed to expand the buffer, end the function
       if (tempPtr == NULL) {
-        printf("Failed to allocate enough memory to file buffer\n");
+        fprintf(stderr, "Failed to allocate enough memory to buffer\n");
         free(buffer);
         *bufferPtr = NULL;
         return 0;
@@ -174,13 +174,148 @@ void serve_file(int connectSocketFD, char *path) {
   return;
 }
 
-void serve_directory(int fd, char *path) {
-  http_start_response(fd, 200);
-  http_send_header(fd, "Content-Type", http_get_mime_type(".html"));
-  http_end_headers(fd);
+/**
+ * Serves the contents of the directory stored at `path` to the client.
+ * The relative directory at `path` ("./XXX") should be valid.
+ * 
+ * @param connectSocketFD The connection socket file descriptor
+ * @param path The path of the file to be served
+ */
+void serve_directory(int connectSocketFD, char *path) {
+  // edge cases
+  if (connectSocketFD < 0 || path == NULL) {
+    return;
+  }
 
-  /* TODO: PART 3 */
+  int bufferSize = INITIAL_BUFFER_SIZE, totalBytesCopied = 0;
+  char *lineBuffer = (char *) malloc(bufferSize); /** TODO: free this */
+  char *buffer = (char *) malloc(bufferSize); /** TODO: free this */
+  DIR *directory = opendir(path);
+  struct dirent *directoryEntry = NULL;
 
+  do {
+    /*
+     * iteratively read an entry from the directory:
+     *  if the entry is NULL and there's no error, there's no more entry in
+     *  the directory; if the entry is NULL but there's an erorr, reply that
+     *  there was a server error;
+     */
+    errno = 0;
+    if ((directoryEntry = readdir(directory)) == NULL){
+      if (errno) {
+        perror("Failed to load directory content: ");
+        send_failure_response(connectSocketFD, 500);
+        free(buffer);
+        free(lineBuffer);
+        return;
+      } else {
+        break;
+      }
+    }
+
+    /*
+     * the directory entry should be in html format: `<a href="/path/filename">filename</a><br/>\r\n`.
+     * `path` is always relative (./XXX), but the requested path must start
+     * with a forward-slash, so we ommit the '.' here. 
+     */
+    char *subPath = directoryEntry->d_name;
+    int lineLength = 0;
+
+    /*
+     * If the subPath is the current directory ("."), then the link would
+     * point to "/path/.", which is interpretable by the server; if the
+     * subPath is the parent directory (".."), then we must make sure that
+     * the relative parent directory is accessible, and remove the ".."
+     * from the link; otherwise the server won't be able to interpret it.
+     * 
+     * There is only one directory that can return a valid parent directory:
+     * /hw4/www/my_documents. If that's what the relative `path` resolves to,
+     * then we will return the link to the relative parent directory. Since
+     * we already confirmed that `path` does not contain ".." and is indeed
+     * a valid directory, we don't need to worry about the server's working
+     * directory, and only need to consider the `path` itself.
+     * 
+     * There are two valid `path` cases:
+     *  if SERVER_FILE_PATH = "." = /hw4 and `path` = "./www/my_documents",
+     *  then the parent directory link should be "/www";
+     *  if SERVER_FILE_PATH = "./www" = /hw4/www and `path` = "./my_documents",
+     *  then the parent directory link should be "/".
+     * If `path` is neither of these cases, we skip over the link to the
+     * parent directory.
+     */
+    if (strcmp(subPath, "..") == 0) {
+      if (strcmp(path, "./www/my_documents") == 0 || strcmp(path, "./my_documents") == 0) {
+        if (strcmp(SERVER_FILE_PATH, ".") == 0) {
+          lineLength = snprintf(lineBuffer, INITIAL_BUFFER_SIZE, "<a href=\"/www\">%s</a><br/>\r\n", subPath);
+        } else if (strcmp(SERVER_FILE_PATH, "./www") == 0) {
+          lineLength = snprintf(lineBuffer, INITIAL_BUFFER_SIZE, "<a href=\"/\">%s</a><br/>\r\n", subPath);
+        }
+      } else {
+        continue;
+      }
+    } else {
+      lineLength = snprintf(lineBuffer, INITIAL_BUFFER_SIZE, "<a href=\"%s/%s\">%s</a><br/>\r\n", path + 1, subPath, subPath);
+    }
+
+    /*
+     * if the formatted line is incorrectly encoded or is longer than the
+     * (buffer - null-char), reply that there was a server error
+     */
+    if (lineLength < 0 || lineLength >= INITIAL_BUFFER_SIZE) {
+      fprintf(stderr, "Directory entry too long for the buffer\n");
+      send_failure_response(connectSocketFD, 500);
+      free(buffer);
+      free(lineBuffer);
+      return;
+    }
+
+    /*
+     * if the (line + null-char) does not fit in the remaining space in
+     * the buffer, we double the size of the buffer; the buffer does not
+     * expand if (line + null-char) fit snuggly in the remaining space
+     */
+    if ((lineLength + 1) > (bufferSize - totalBytesCopied)) {
+      bufferSize *= 2;
+      char *tempPtr = (char *) realloc(buffer, bufferSize);
+
+      // if we failed to expand the buffer, end the function
+      if (tempPtr == NULL) {
+        fprintf(stderr, "Failed to allocate enough memory to buffer\n");
+        send_failure_response(connectSocketFD, 500);
+        free(buffer);
+        free(lineBuffer);
+        return;
+        // else, use the new buffer
+      } else {
+        buffer = tempPtr;
+      }
+    }
+
+    // copy the line into the buffer
+    memcpy(buffer + totalBytesCopied, lineBuffer, lineLength);
+    totalBytesCopied += lineLength;
+  } while (true);
+  buffer[totalBytesCopied] = '\0';
+
+  /*
+   * the C int (unsigned int) is 4 bytes and can express at most
+   * 2,147,483,647 (4,294,967,295), which is 11 bytes (including the null-char)
+   */
+  char contentLength[11];
+  sprintf(contentLength, "%d", totalBytesCopied);
+
+  http_start_response(connectSocketFD, 200);
+  http_send_header(connectSocketFD, "Content-Type", http_get_mime_type(".html"));
+  http_send_header(connectSocketFD, "Content-Length", contentLength);
+  http_end_headers(connectSocketFD);
+  
+  if (write_all(connectSocketFD, buffer, totalBytesCopied) != totalBytesCopied) {
+    fprintf(stderr, "Failed to write all content into response\n");
+  }
+
+  free(buffer);
+  free(lineBuffer);
+  return;
 }
 
 /**
@@ -233,17 +368,17 @@ void handle_files_request(int connectSocketFD) {
     } else {
       struct stat fileStatus;
       /*
-      * if we failed to retrieve the file status, then reply that the path was
-      * not found
-      */ 
+       * if we failed to retrieve the file status, then reply that the path was
+       * not found
+       */ 
       if (stat(path, &fileStatus) == -1) {
         fprintf(stderr, "Failed to find path: %s\n", path);
         perror(NULL);
         send_failure_response(connectSocketFD, 404);
         /*
-        * else if the path is a directory, either serve the index.html file
-        * (if it exists), or reply that the path was not found
-        */
+         * else if the path is a directory, either serve the index.html file
+         * (if it exists), or reply that the path was not found
+         */
       } else if (S_ISDIR(fileStatus.st_mode)) {
         // construct the path of the index file
         char *indexFileName = "/index.html";
@@ -253,27 +388,27 @@ void handle_files_request(int connectSocketFD) {
 
         struct stat indexFileStatus;
         /*
-        * if there is an index.html file in the path, serve it
-        */
+         * if there is an index.html file in the path, serve it
+         */
         if (stat(indexFilePath, &indexFileStatus) != -1 && S_ISREG(indexFileStatus.st_mode)) {
           serve_file(connectSocketFD, indexFilePath);
           /*
-          * else, there is no index.html in the directory, and we don't serve
-          * directories yet, so reply that the path is not found
-          */
+           * else, there is no index.html in the path, so serve a list of
+           * links to the subdirectories in the path
+           */
         } else {
-          send_failure_response(connectSocketFD, 404);
+          serve_directory(connectSocketFD, path);
         }
         free(indexFilePath);
         /*
-        * else if the path is a regular file, serve it
-        */
+         * else if the path is a regular file, serve it
+         */
       } else if (S_ISREG(fileStatus.st_mode)) {
         serve_file(connectSocketFD, path);
         /*
-        * else, the requested path was not a valid file or directory,
-        * so reply that the path was not found
-        */
+         * else, the requested path was not a valid file or directory,
+         * so reply that the path was not found
+         */
       } else {
         fprintf(stderr, "Path is not directory or file: %s\n", path);
         perror(NULL);
@@ -282,11 +417,7 @@ void handle_files_request(int connectSocketFD) {
     }
     free(path);
   }
-  /*
-   * TODO: PART 3 is to serve both files and directories. You will need to
-   * determine when to call serve_file() or serve_directory() depending
-   * on `path`. Make your edits below here in this function.
-   */
+
   close(connectSocketFD);
   return;
 }
