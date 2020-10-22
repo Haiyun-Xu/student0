@@ -3,7 +3,7 @@ CFLAGS=-g -ggdb3 -Wall -std=gnu99
 LDFLAGS=-pthread
 EXECUTABLES=basicserver forkserver threadserver poolserver
 SOURCE=server.c
-HELPERS=server_signal.c libhttp.c wq.c
+HELPERS=wq.c server_config.c http_helper.c server_signal.c
 OBJECTS=$(HELPERS:.c=.o)
 
 all: $(EXECUTABLES)
@@ -21,4 +21,4 @@ poolserver: $(OBJECTS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -D POOLSERVER $(SOURCE) $(OBJECTS) -o $@
 
 clean:
-	rm -f $(EXECUTABLES)
+	rm -f $(EXECUTABLES) ${OBJECTS}

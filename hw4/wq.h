@@ -2,6 +2,9 @@
 #define __WQ__
 
 #include <pthread.h>
+#include <stdlib.h>
+
+#include "utlist.h"
 
 /* WQ defines a work queue which will be used to store accepted client sockets
  * waiting to be served. */

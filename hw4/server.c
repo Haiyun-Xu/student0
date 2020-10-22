@@ -13,12 +13,13 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
-#include "server_config.h"
-#include "server_signal.h"
-#include "libhttp.h"
 #include "wq.h"
+#include "http_helper.h"
+#include "server_signal.h"
+#include "server_config.h"
 
 /**
  * Read all the content from the file descriptor into the buffer.
@@ -90,7 +91,7 @@ int read_all(int fd, char **bufferPtr) {
  */
 int write_all(int fd, char *buffer, int bufferSize) {
   // edge cases
-  if (fd < 0 || buffer == NULL || bufferSize <= 0) {
+  if (fd < 0 || buffer == NULL || bufferSize < 0) {
     return 0;
   }
 
@@ -99,10 +100,10 @@ int write_all(int fd, char *buffer, int bufferSize) {
 
   do {
     bytesWritten = write(fd, buffer, bytesLeftToWrite);
-    // if the write failed, return the total number of written bytes and abort
+    // if the write failed, return -1
     if (bytesWritten == -1) {
       perror("Failed to write to file description: ");
-      return totalBytesWritten;
+      return bytesWritten;
     }
 
     totalBytesWritten += bytesWritten;
@@ -110,6 +111,22 @@ int write_all(int fd, char *buffer, int bufferSize) {
   } while (bytesLeftToWrite > 0);
   
   return totalBytesWritten;
+}
+
+/**
+ * Shut down the connection and close the socket.
+ * 
+ * @param socketFD The socket file descriptor
+ */
+void close_socket(int socketFD) {
+  // edge cases
+  if (socketFD < 0) {
+    return;
+  }
+
+  shutdown(socketFD, SHUT_RDWR);
+  close(socketFD);
+  return;
 }
 
 /**
@@ -122,7 +139,7 @@ void send_failure_response(int connectSocketFD, int httpCode) {
   http_start_response(connectSocketFD, httpCode);
   http_send_header(connectSocketFD, "Content-Type", "text/html");
   http_end_headers(connectSocketFD);
-  close(connectSocketFD);
+  close_socket(connectSocketFD);
   return;
 }
 
@@ -418,11 +435,168 @@ void handle_files_request(int connectSocketFD) {
     free(path);
   }
 
-  close(connectSocketFD);
+  close_socket(connectSocketFD);
   return;
 }
 
-/*
+/**
+ * The struct used as the argument to relay_communication().
+ */
+struct socket_pair {
+  int sourceSocketFD;
+  int targetSocketFD;
+};
+
+/**
+ * Returns whether the connection on the given socket is still alive.
+ * 
+ * @param socketFD A socket file descriptor
+ * 
+ * @return Returns 0 if connection is alive, or -1 and set errno if not
+ */
+int is_connection_alive(int socketFD) {
+  char temp = '\0';
+  // write nothing into the socket, but check if the connection is closed
+  int result = write(socketFD, &temp, 0);
+  return result;
+}
+
+/**
+ * Continuous forward client requests to remote server.
+ * 
+ * If we don't parse the client request, we won't need to reconstruct it.
+ * That means we can just faithfully forward the request to remote, by simple
+ * read, buffer, and write.
+ * 
+ * Requirement:
+ * - if neither client nor the remote closes their connection, then the
+ * server will continue to proxy indefinitely;
+ * - whenever one of the two connections is closed, the server will detect
+ * the connection closure and close both of its sockets, thereby closing
+ * the other connection;
+ * 
+ * Specification:
+ * - whenever a connection is closed by a peer, the thread reading the socket
+ * will be pre-empted and unblocked;
+ * - whenever a connection is closed by a server thread, other server threads
+ * blocked by a read on that connection's socket will not be pre-empted;
+ * - therefore, a solution to the above issue is to always make non-blocking
+ * read calls;
+ * 
+ * Solution:
+ * - to make non-blocking read calls, use the MSG_DONTWAIT flag on recv();
+ * - to detect a closed connection at read time, attempt a 0-byte dummy
+ * write on the socket;
+ * 
+ * @param argument Pointer to the argument struct socket_pair
+ */
+void *relay_communication(void *argument) {
+  struct socket_pair *socketPair = (struct socket_pair *) argument;
+  int sourceSocketFD = socketPair->sourceSocketFD;
+  int targetSocketFD = socketPair->targetSocketFD;
+  
+  int bufferSize = INITIAL_BUFFER_SIZE;
+  char *buffer = (char *) malloc(bufferSize); /** TODO: free this */
+  int bytesRead, bytesWritten;
+
+  // record the time at which the socket connections becomes alive
+  time_t connectionStartTime;
+  time(&connectionStartTime);
+
+  /*
+   * continuously read from the source and write to the target, and break
+   * when either socket is closed
+   */
+  while (true) {
+    /*
+     * close both socket connections if they are older than how long the
+     * sever wants to keep them alive
+     */
+    if (difftime(time(NULL), connectionStartTime) > CONNECTION_TTL) {
+      printf("Connections older than TTL; closing connections\n");
+      break;
+    }
+
+    /*
+     * if a target socket connection is closed, the write() on that socket
+     * can detect the closure; but if the source socket connection is closed,
+     * we need to attempt a fake write() on the source socket to detect any
+     * potential closure
+     */
+    if (is_connection_alive(sourceSocketFD) == -1) {
+      if (errno != EPIPE && errno != EBADF) {
+        perror("Error when attempting to read from socket: ");
+      }
+      break;
+    }
+
+    bytesRead = recv(sourceSocketFD, buffer, bufferSize, MSG_DONTWAIT);
+    if (bytesRead == -1) {
+      /*
+       * if recv() returns -1, there are three scenarios:
+       * 1) it returned because the connection is idle and there's no data
+       * in the socket. This case is not an error, but the thread should
+       * check the status of the other connection and see if the transaction
+       * can be terminated;
+       * 2) it returned and set errno to EBADF, which means other threads
+       * have closed this socket, thereby signaling that the transaction should
+       * terminate, and the current thread should exit;
+       * 3) it returned and set errno to some other error, which means that
+       * an error occurred, and the current thread should abort and exit;
+       */
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        // no-opt
+      } else if (errno == EBADF) {
+        break;
+      } else {
+        perror("Failed to read from socket: ");
+        break;
+      }
+    }
+
+    // detect target socket connection closure
+    if (is_connection_alive(targetSocketFD) == -1) {
+      if (errno != EPIPE && errno != EBADF) {
+        perror("Error when attempting to write to socket: ");
+      }
+      break;
+    }
+
+    /*
+     * if a target socket connection is closed, the write() on that socket
+     * can detect the closure
+     */
+    bytesWritten = write_all(targetSocketFD, buffer, bytesRead);
+    if (bytesWritten == -1) {
+      /*
+       * if write_all() returns -1, there are three scenarios:
+       * 1) it returned and set errno to EPIPE, which means the connection
+       * was closed by the peer socket, and therefore the transaction has
+       * ended, and the current thread should close both sockets;
+       * 2) it returned and set errno to EBADF, which means other threads
+       * have closed this socket, thereby signaling that the transaction should
+       * terminate, and the current thread should exit;
+       * 3) it returned and set errno to some other error, which means that
+       * an error occurred, and the current thread should abort and exit;
+       */
+      if (errno != EPIPE && errno != EBADF) {
+        perror("Failed to write to socket: ");
+      }
+      break;
+    }
+  }
+
+  /*
+   * the thread that received the EPIPE should close both sockets, thereby
+   * notifying the other thred to terminate
+   */
+  close_socket(sourceSocketFD);
+  close_socket(targetSocketFD);
+  free(buffer);
+  return NULL;
+}
+
+/**
  * Opens a connection to the proxy target (hostname=SERVER_PROXY_HOSTNAME and
  * port=server_proxy_port) and relays traffic to/from the stream fd and the
  * proxy target_fd. HTTP requests from the client (fd) should be sent to the
@@ -434,58 +608,82 @@ void handle_files_request(int connectSocketFD) {
  *   +--------+     +------------+     +--------------+
  *
  *   Closes client socket (fd) and proxy target fd (target_fd) when finished.
+ * 
+ * @param connectSocketFD The connection socket file descriptor
  */
-void handle_proxy_request(int fd) {
+void handle_proxy_request(int connectSocketFD) {
+  // edge cases
+  if (connectSocketFD < 0) {
+    return;
+  }
 
   /*
   * The code below does a DNS lookup of SERVER_PROXY_HOSTNAME and 
-  * opens a connection to it. Please do not modify.
+  * opens a connection to it.
   */
-  struct sockaddr_in target_address;
-  memset(&target_address, 0, sizeof(target_address));
-  target_address.sin_family = AF_INET;
-  target_address.sin_port = htons(SERVER_PROXY_PORT);
+  // use DNS to resolve the proxy remote's IP address
+  struct hostent *remoteDnsEntry = gethostbyname2(SERVER_PROXY_HOSTNAME, AF_INET);
+  if (remoteDnsEntry == NULL) {
+    fprintf(stderr, "Cannot resolve IP address for host: %s\n", SERVER_PROXY_HOSTNAME);
+    send_failure_response(connectSocketFD, 502);
+    close_socket(connectSocketFD);
+    exit(ENXIO);
+  }
+  char *resolvedRemoteAddress = remoteDnsEntry->h_addr;
 
-  // Use DNS to resolve the proxy target's IP address
-  struct hostent *target_dns_entry = gethostbyname2(SERVER_PROXY_HOSTNAME, AF_INET);
+  // setup the IPv4 remote address struct
+  struct sockaddr_in remoteAddress;
+  bzero((char *)&remoteAddress, sizeof(remoteAddress));
+  remoteAddress.sin_family = AF_INET;
+  remoteAddress.sin_port = htons(SERVER_PROXY_PORT);
+  memcpy(&(remoteAddress.sin_addr), resolvedRemoteAddress, sizeof(remoteAddress.sin_addr));
 
-  // Create an IPv4 TCP socket to communicate with the proxy target.
-  int target_fd = socket(PF_INET, SOCK_STREAM, 0);
-  if (target_fd == -1) {
-    fprintf(stderr, "Failed to create a new socket: error %d: %s\n", errno, strerror(errno));
-    close(fd);
+  // Create an IPv4 TCP socket to communicate with the proxy remote.
+  int remoteSocketFD = socket(PF_INET, SOCK_STREAM, 0);
+  if (remoteSocketFD == -1) {
+    perror("Failed to create a new socket: ");
+    send_failure_response(connectSocketFD, 502);
+    close_socket(connectSocketFD);
     exit(errno);
   }
 
-  if (target_dns_entry == NULL) {
-    fprintf(stderr, "Cannot find host: %s\n", SERVER_PROXY_HOSTNAME);
-    close(target_fd);
-    close(fd);
-    exit(ENXIO);
-  }
-
-  char *dns_address = target_dns_entry->h_addr_list[0];
-
-  // Connect to the proxy target.
-  memcpy(&target_address.sin_addr, dns_address, sizeof(target_address.sin_addr));
-  int connection_status = connect(target_fd, (struct sockaddr*) &target_address,
-      sizeof(target_address));
-
-  if (connection_status < 0) {
-    /* Dummy request parsing, just to be compliant. */
-    http_request_parse(fd);
-
-    http_start_response(fd, 502);
-    http_send_header(fd, "Content-Type", "text/html");
-    http_end_headers(fd);
-    close(target_fd);
-    close(fd);
+  if (connect(remoteSocketFD, (struct sockaddr*) &remoteAddress, sizeof(remoteAddress)) == -1) {
+    perror("Failed to connect to remote server: ");
+    close_socket(remoteSocketFD);
+    send_failure_response(connectSocketFD, 502);
+    close_socket(connectSocketFD);
     return;
-
   }
 
-  /* TODO: PART 4 */
+  // initialize the thread arguments
+  struct socket_pair socketPairs[2];
+  socketPairs[0].sourceSocketFD = connectSocketFD;
+  socketPairs[0].targetSocketFD = remoteSocketFD;
+  socketPairs[1].sourceSocketFD = remoteSocketFD;
+  socketPairs[1].targetSocketFD = connectSocketFD;
 
+  // spin up the threads
+  pthread_t threads[2];
+  int numOfThreads = 2, threadNum = 0, result = 0;
+  for (threadNum = 0; threadNum < numOfThreads; threadNum++) {
+    if ((result = pthread_create(&(threads[threadNum]), NULL, relay_communication, &(socketPairs[threadNum]))) != 0) {
+      fprintf(stderr, "Failed to create thread %d: error number %d\n", threadNum, result);
+      close_socket(remoteSocketFD);
+      send_failure_response(connectSocketFD, 502);
+      close_socket(connectSocketFD);
+      return;
+    }
+    printf("Started thread %d\n", threadNum);
+  }
+
+  // wait for the threads to return
+  for (threadNum = 0; threadNum < numOfThreads; threadNum++) {
+    if((result = pthread_join(threads[threadNum], NULL)) != 0) {
+      fprintf(stderr, "Failed to join with thread %d: error number %d\n", threadNum, result);
+    }
+    printf("Stopped thread %d\n", threadNum);
+  }
+  return;
 }
 
 #ifdef POOLSERVER
@@ -691,6 +889,12 @@ void setup_server_address(struct sockaddr_in *serverAddress) {
  * the fd number of the server socket in *serverSocketNum. For each accepted
  * connection, calls request_handler with the accepted fd number.
  * 
+ * How requests are served:
+ * 1) (usually random) socket on client host (192.168.162.1:4444) <==> known
+ * socket on server host (192.168.162.162:8000);
+ * 2) random socket on server host (10.0.2.15:52908) <==> known socket on
+ * remote host (172.217.7.14:80 for google.com);
+ * 
  * @param serverSocketFD Pointer to the server socket file descriptor
  * @param requestHandler The client connection handler function
  */
@@ -789,8 +993,7 @@ void serve_forever(int *serverSocketFD, void (*requestHandler)(int)) {
 #endif
   }
 
-  shutdown(*serverSocketFD, SHUT_RDWR);
-  close(*serverSocketFD);
+  close_socket(*serverSocketFD);
 }
 
 /**

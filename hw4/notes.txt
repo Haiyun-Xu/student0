@@ -1,0 +1,47 @@
+Behavior when calling:
+- Q: read() on an open connection and full socket?
+  A: returns the #bytes read;
+- Q: read() on an open connection but empty socket?
+  A: the thread hangs, until the connection is closed;
+- Q: read() on a closed connection but open socket?
+  A: it returns 0 without setting errno;
+- Q: read() on a closed connection and closed socket?
+  A: returns -1 and set errno to EBADF;
+- Q: write() on an open connection and full buffer?
+  A: returns the #bytes written;
+- Q: write() on an open connection but empty buffer?
+  A: returns 0 without setting errno;
+- Q: write() on a closed connection and open socket?
+  A: triggers SIGPIPE, or return -1 and set errno to EPIPE;
+- Q: write() on a closed connection and closed socket?
+  A: returns -1 and set errno to BADF;
+
+Here is a description of what happens during a proxying session:
+- With both connections are open, thread 2 forwards the client request to
+remote, and thread 3 is suspended before it forwards the remote response
+back to client.
+
+- Thread 2 then calls read() again on the client socket, but since the client
+socket is empty, thread 2 hangs indefinitely.
+
+- Once thread 3 is resumed and completes forwarding the remote response to
+the client, the client connection is closed. Thread 3 calls read() again
+on the remote socket, and also hangs indefinitely because the socket is empty.
+
+- But since the client connection was closed, thread 2's read() quits hanging
+and returns 0, without altering errno. Thread 2 then tries to write 0 bytes
+to the remote socket, but that also returns 0 immediately, without altering
+errno. So thread 2 moves on and call read() on the client socket again, but
+the result just repeats and thread 2 loops indefitely.
+
+- After a some time of inactivity, the remote closes the remote connection
+voluntarily, which breaks thread 3's read() from hanging. Thread 3 then
+moves on and attempts to write to the client socket, but since the client
+connection is cloed, the server process receives SIGPIPE, which is ignored
+by the handler, so thread 3's write() on client socket returns -1 and sets
+errno to EPIPE. This causes thread 3 to close both sockets and exit.
+
+- Once thread 3 closes both sockets, thread 3's call of read()/write() will
+return -1 and set errno to EBADF, which causes thread 2 to close both
+sockets and exit as well. The main thread then joins with both terminated
+threads and wait for the next client connection.

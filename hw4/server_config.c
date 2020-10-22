@@ -6,42 +6,36 @@
  * @copyright MIT
  */
 
-#ifndef SERVER_CONFIG_H
-#define SERVER_CONFIG_H
+#include "server_config.h"
 
-#include "wq.h"
-
-typedef void (*request_handler_func) (int);
-
-extern char *USAGE;
+char *USAGE =
+  "Usage: ./<server> --files some_directory/ [--port 8000 --num-threads 5]\n"
+  "       ./<server> --proxy example.com:80 [--port 8000 --num-threads 5]\n";
 
 // the file descriptor number representing the server socket
-extern int SERVER_SOCKET;
+int SERVER_SOCKET = -1;
 
 // the port at which the server is listening for connection requests
-extern int SERVER_PORT;
+int SERVER_PORT = 8000;
 
 // the path of the file requested
-extern char *SERVER_FILE_PATH;
+char *SERVER_FILE_PATH = NULL;
 
 // the hostname of the remote requested
-extern char *SERVER_PROXY_HOSTNAME;
-extern int SERVER_PROXY_PORT;
+char *SERVER_PROXY_HOSTNAME = NULL;
+int SERVER_PROXY_PORT = 80;
 
 // length of the server socket connection backlog
-extern int SERVER_CONNECTION_BACKLOG_LENGTH;
+int SERVER_CONNECTION_BACKLOG_LENGTH = 1024;
 
 // initial size of the buffer in bytes
-extern int INITIAL_BUFFER_SIZE;
+int INITIAL_BUFFER_SIZE = 1024;
 
 // close the socket connection after this amount of time in seconds
-extern double CONNECTION_TTL;
+double CONNECTION_TTL = 30.0;
 
 // only used by poolserver
-wq_t WORK_QUEUE;
-extern int NUM_THREADS;
+int NUM_THREADS = 0;
 
 // the request handler function for the server process
-extern request_handler_func REQUEST_HANDLER;
-
-#endif /* SERVER_CONFIG_H */
+request_handler_func REQUEST_HANDLER = NULL;
