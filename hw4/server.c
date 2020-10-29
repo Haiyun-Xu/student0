@@ -947,27 +947,47 @@ void serve_forever(int *serverSocketFD, void (*requestHandler)(int)) {
 
 #ifdef BASICSERVER
     /*
-     * This is a single-process, single-threaded HTTP server.
-     * When a client connection has been accepted, the main
-     * process sends a response to the client. During this
-     * time, the server does not listen or accept connections.
-     * Only after a response has been sent to the client can
-     * the server accept a new connection.
+     * This version of the server uses a single-process, single-threaded
+     * to handle the client request. When a client connection is accepted,
+     * the main process sends a response to the client. During this time,
+     * the server does not listen nor accept new connections. Only after
+     * the client connection terminates can the server accept a new connection.
      */
     requestHandler(connectSocketFD);
 #elif FORKSERVER
     /* 
-     * TODO: PART 5 BEGIN
-     *
-     * When a client connection has been accepted, a new
-     * process is spawned. This child process will send
-     * a response to the client. Afterwards, the child
-     * process should exit. During this time, the parent
-     * process should continue listening and accepting
-     * connections.
+     * This version of the server uses a separate child process to handle
+     * the client request. When a client connection is accepted, a new
+     * process is forked. The child process will send a response to the
+     * client and then exit. During this time, the parent process should
+     * continue listening and accepting connections.
      */
+    pid_t processID;
+    processID = fork();
 
-    /* PART 5 END */
+    /*
+     * if the parent failed to fork, cannot handle the client connection
+     * and request, so stop the server. Otherwise, the parent process
+     * continues to listen for new client connection and does not wait for
+     * the child process
+     */
+    if (processID == -1) {
+      perror("Failed to fork child process: ");
+      close_socket(connectSocketFD);
+      break;
+
+      /*
+       * the child process takes care of the client request, shuts down
+       * the client connection, but only closes the server socket without
+       * shutting down its connection, because the parent process is still
+       * listening on it.
+       */
+    } else if (processID == 0) {
+      requestHandler(connectSocketFD);
+      close(*serverSocketFD);
+      printf("Child process exiting\n");
+      exit(EXIT_SUCCESS);
+    }
 #elif THREADSERVER
     /* 
      * TODO: PART 6 BEGIN
