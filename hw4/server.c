@@ -667,21 +667,21 @@ void handle_proxy_request(int connectSocketFD) {
   int numOfThreads = 2, threadNum = 0, result = 0;
   for (threadNum = 0; threadNum < numOfThreads; threadNum++) {
     if ((result = pthread_create(&(threads[threadNum]), NULL, relay_communication, &(socketPairs[threadNum]))) != 0) {
-      fprintf(stderr, "Failed to create thread %d: error number %d\n", threadNum, result);
+      fprintf(stderr, "Failed to create proxy thread %d: error number %d\n", threadNum, result);
       close_socket(remoteSocketFD);
       send_failure_response(connectSocketFD, 502);
       close_socket(connectSocketFD);
       return;
     }
-    printf("Started thread %d\n", threadNum);
+    printf("Started proxy thread %d\n", threadNum);
   }
 
   // wait for the threads to return
   for (threadNum = 0; threadNum < numOfThreads; threadNum++) {
     if((result = pthread_join(threads[threadNum], NULL)) != 0) {
-      fprintf(stderr, "Failed to join with thread %d: error number %d\n", threadNum, result);
+      fprintf(stderr, "Failed to join with proxy thread %d: error number %d\n", threadNum, result);
     }
-    printf("Stopped thread %d\n", threadNum);
+    printf("Stopped proxy thread %d\n", threadNum);
   }
   return;
 }
@@ -713,6 +713,27 @@ void init_thread_pool(int numThreads, request_handler_func requestHandler) {
 
 }
 #endif
+
+/**
+ * The struct used as the argument to handle_request().
+ */
+struct request_task {
+  request_handler_func handler;
+  int connectSocketFD;
+};
+
+/**
+ * Handle a request as a separate thread, using given handler and parameters.
+ * 
+ * @param argument Pointer to the argument struct request_task
+ */
+void *handle_request(void *argument) {
+  struct request_task *task = (struct request_task *) argument;
+  task->handler(task->connectSocketFD);
+  free(task);
+  printf("Exiting handler thread\n");
+  return NULL;
+}
 
 /**
  * Exit the process after printing the program usage.
@@ -933,6 +954,8 @@ void serve_forever(int *serverSocketFD, void (*requestHandler)(int)) {
   struct sockaddr_in clientAddress;
   size_t clientAddressLen = sizeof(clientAddress);
   int connectSocketFD;
+  // variables for THREADSERVER only
+  int handlerThreadNum = 0;
 
   // continuously accept connection requests and handle client connections
   while (true) {
@@ -990,16 +1013,37 @@ void serve_forever(int *serverSocketFD, void (*requestHandler)(int)) {
     }
 #elif THREADSERVER
     /* 
-     * TODO: PART 6 BEGIN
-     *
-     * When a client connection has been accepted, a new
-     * thread is created. This thread will send a response
-     * to the client. The main thread should continue
-     * listening and accepting connections. The main
-     * thread will NOT be joining with the new thread.
+     * This version of the server uses a separate thread to handle the client
+     * request. When a client connection is accepted, a new thread is created
+     * to send a response to the client. The main thread should continue to
+     * listen and accept new connections, and will NOT join with the new thread.
      */
 
-    /* PART 6 END */
+    /*
+     * because the main thread will continue to run, the argument to the
+     * new thread must be allocated on the heap (so as to not be overwritten).
+     * Each new thread should take ownership of argument and free it before
+     * terminating
+     */
+    struct request_task *task = (struct request_task *) malloc(sizeof(struct request_task));
+    task->handler = requestHandler;
+    task->connectSocketFD = connectSocketFD;
+
+    /*
+     * if handler thread creation failed, respond to the client with an
+     * internal server error message and close the client connection, but
+     * instead of exiting, continue to listen for new connection request
+     */
+    pthread_t handlerThread;
+    int threadCreationResult;
+    if ((threadCreationResult = pthread_create(&handlerThread, NULL, handle_request, task)) != 0) {
+      fprintf(stderr, "Failed to create handler thread %d: error number %d\n", handlerThreadNum++, threadCreationResult);
+      send_failure_response(connectSocketFD, 500);
+      close_socket(connectSocketFD);
+    } else {
+      printf("Started handler thread %d\n", handlerThreadNum++);
+    }
+
 #elif POOLSERVER
     /* 
      * TODO: PART 7 BEGIN
