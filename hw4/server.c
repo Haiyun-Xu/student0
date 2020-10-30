@@ -687,31 +687,68 @@ void handle_proxy_request(int connectSocketFD) {
 }
 
 #ifdef POOLSERVER
-/* 
- * All worker threads will run this function until the server shutsdown.
- * Each thread should block until a new request has been received.
- * When the server accepts a new connection, a thread should be dispatched
- * to send a response to the client.
+
+/**
+ * The task loop in which handler threads run, until the main server thread
+ * terminates. Each thread should block (instead of busy waiting) until a
+ * new request has been received. When the main server thread accepts a new
+ * connection, a handler thread should be dispatched to handle the client request.
+ * 
+ * @param request_handler The request_handler_func that the handler should use
  */
-void *handle_clients(void *void_request_handler) {
-  request_handler_func requestHandler = (request_handler_func) void_request_handler;
-  /* (Valgrind) Detach so thread frees its memory on completion, since we won't
-   * be joining on it. */
+void *handle_clients(void *request_handler) {
+  request_handler_func requestHandler = (request_handler_func) request_handler;
+  /*
+   * Detach the current thread, so that the thread frees its own memory on
+   * completion, since the main thread won't be joining on it.
+   */
   pthread_detach(pthread_self());
 
-  /* TODO: PART 7 */
+  int connectSocketFD;
+  while (true) {
+    /*
+     * since all that the current thread gets is a file descriptor (meaning
+     * that there's no additional states to indicate whether the thread can
+     * start handling the client connection), there's no need to place the
+     * blocking call in a loop and guard the loop with a states check
+     */
+    connectSocketFD = wq_pop(&WORK_QUEUE);
+    requestHandler(connectSocketFD);
+  }
+  
   return NULL;
-
 }
 
-/* 
- * Creates `NUN_THREADS` amount of threads. Initializes the work queue.
+/**
+ * Creates a number of threads and initializes the work queue.
+ * 
+ * @param numThreads The number of threads to create
+ * @param requestHandler The request handler function each thread will use
  */
 void init_thread_pool(int numThreads, request_handler_func requestHandler) {
+  // edge cases
+  if (numThreads == 0) {
+    return;
+  }
 
-  /* TODO: PART 7 */
+  /*
+   * we don't need to identify each of the threads, so all threads can use
+   * a single pthread_t
+   */
+  pthread_t thread;
+  int result;
+  for (int threadNum = 0; threadNum < numThreads; threadNum++) {
+    if ((result = pthread_create(&thread, NULL, handle_clients, requestHandler)) != 0) {
+      fprintf(stderr, "Failed to create thread pool: error number %d\n", result);
+      exit(EXIT_FAILURE);
+    }
+    printf("Spawned handler thread %d out of %d\n", threadNum+1, numThreads);
+  }
 
+  wq_init(&WORK_QUEUE);
+  return;
 }
+
 #endif
 
 /**
@@ -728,8 +765,15 @@ struct request_task {
  * @param argument Pointer to the argument struct request_task
  */
 void *handle_request(void *argument) {
+  /*
+   * Detach the current thread, so that the thread frees its own memory on
+   * completion, since the main thread won't be joining on it.
+   */
+  pthread_detach(pthread_self());
+
   struct request_task *task = (struct request_task *) argument;
   task->handler(task->connectSocketFD);
+  
   free(task);
   printf("Exiting handler thread\n");
   return NULL;
@@ -944,11 +988,13 @@ void serve_forever(int *serverSocketFD, void (*requestHandler)(int)) {
   printf("Listening on port %d...\n", SERVER_PORT);
 
 #ifdef POOLSERVER
+
   /* 
-   * The thread pool is initialized *before* the server
-   * begins accepting client connections.
+   * initialize the thread pool before the main server thread accepts
+   * any client connection
    */
   init_thread_pool(NUM_THREADS, REQUEST_HANDLER);
+
 #endif
 
   struct sockaddr_in clientAddress;
@@ -977,6 +1023,7 @@ void serve_forever(int *serverSocketFD, void (*requestHandler)(int)) {
      * the client connection terminates can the server accept a new connection.
      */
     requestHandler(connectSocketFD);
+
 #elif FORKSERVER
     /* 
      * This version of the server uses a separate child process to handle
@@ -1011,6 +1058,7 @@ void serve_forever(int *serverSocketFD, void (*requestHandler)(int)) {
       printf("Child process exiting\n");
       exit(EXIT_SUCCESS);
     }
+
 #elif THREADSERVER
     /* 
      * This version of the server uses a separate thread to handle the client
@@ -1045,15 +1093,15 @@ void serve_forever(int *serverSocketFD, void (*requestHandler)(int)) {
     }
 
 #elif POOLSERVER
-    /* 
-     * TODO: PART 7 BEGIN
-     *
-     * When a client connection has been accepted, add the
-     * client's socket number to the work queue. A thread
-     * in the thread pool will send a response to the client.
+    /*
+     * This version of the server uses a pool of constantly running threads
+     * to handle the client request. When a client connection is accepted, the
+     * main server thread adds the client's socket into the work queue. A
+     * handler thread in the thread pool will pick up the client socket, handle
+     * the request, and send a response to the client.
      */
+    wq_push(&WORK_QUEUE, connectSocketFD);
 
-    /* PART 7 END */
 #endif
   }
 

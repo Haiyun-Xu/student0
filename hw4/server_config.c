@@ -35,7 +35,7 @@ int INITIAL_BUFFER_SIZE = 1024;
 double CONNECTION_TTL = 30.0;
 
 // only used by poolserver
-int NUM_THREADS = 0;
+int NUM_THREADS = 5;
 
 // the request handler function for the server process
 request_handler_func REQUEST_HANDLER = NULL;
