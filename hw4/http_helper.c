@@ -1,18 +1,38 @@
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+/**
+ * This module contains helper functions for data transfer under the HTTP protocol.
+ *
+ * @author Haiyun Xu <xuhaiyunhenry@gmail.com>
+ * @copyright MIT
+ */
 
-#include "libhttp.h"
+#include "http_helper.h"
 
-#define LIBHTTP_REQUEST_MAX_SIZE 8192
-
+/**
+ * Exit with a fatal error.
+ * 
+ * @param message The error message
+ */
 void http_fatal_error(char *message) {
   fprintf(stderr, "%s\n", message);
   exit(ENOBUFS);
 }
 
+/**
+ * Send an HTTP request line.
+ * 
+ * @param fd The connection socket file descriptor
+ * @param method The HTTP request method
+ * @param path The HTTP requested path
+ */
+void http_start_request(int fd, const char *method, const char *path) {
+  dprintf(fd, "%s %s HTTP/1.0\r\n", method, path);
+}
+
+/**
+ * Parse the HTTP request line.
+ * 
+ * @param fd The connection socket file descriptor
+ */
 struct http_request *http_request_parse(int fd) {
   struct http_request *request = malloc(sizeof(struct http_request));
   if (!request) http_fatal_error("Malloc failed");
@@ -67,6 +87,11 @@ struct http_request *http_request_parse(int fd) {
 
 }
 
+/**
+ * Returns the standard message corresponding to an HTTP status code.
+ * 
+ * @param status_code The HTTP response status code
+ */
 char* http_get_response_message(int status_code) {
   switch (status_code) {
     case 100:
@@ -89,24 +114,81 @@ char* http_get_response_message(int status_code) {
       return "Not Found";
     case 405:
       return "Method Not Allowed";
+    case 502:
+      return "Bad Gateway";
     default:
       return "Internal Server Error";
   }
 }
 
+/**
+ * Send an HTTP response line.
+ * 
+ * @param fd The connection socket file descriptor
+ * @param status_code The response status code
+ */
 void http_start_response(int fd, int status_code) {
   dprintf(fd, "HTTP/1.0 %d %s\r\n", status_code,
       http_get_response_message(status_code));
 }
 
+/**
+ * Send an HTTP response header line.
+ * 
+ * @param fd The connection socket file descriptor
+ * @param key The header name
+ * @param value The header value
+ */
 void http_send_header(int fd, char *key, char *value) {
   dprintf(fd, "%s: %s\r\n", key, value);
 }
 
+/**
+ * End the HTTP response header section.
+ * 
+ * @param fd The connection socket file descriptor
+ */
 void http_end_headers(int fd) {
   dprintf(fd, "\r\n");
 }
 
+/**
+ * Create a hyperlink from a file path.
+ * 
+ * Puts `<a href="/path/filename">filename</a><br/>` into the provided buffer.
+ * The resulting string in the buffer is null-terminated. It is the caller's
+ * responsibility to ensure that the buffer has enough space for the resulting string.
+ * 
+ * @param buffer The string buffer used to store the hyperlink output
+ * @param path The path of the directory
+ * @param filename The name of the file
+ */
+void http_format_href(char *buffer, char *path, char *filename) {
+  int length = strlen("<a href=\"//\"></a><br/>") + strlen(path) + strlen(filename)*2 + 1;
+  snprintf(buffer, length, "<a href=\"/%s/%s\">%s</a><br/>", path, filename, filename);
+}
+
+/**
+ * Create the file path of an index file.
+ * 
+ * Puts `path/index.html` into the provided buffer.
+ * The resulting string in the buffer is null-terminated.
+ * It is the caller's responsibility to ensure that the
+ * buffer has enough space for the resulting string.
+ * 
+ * @param buffer The string buffer used to store the file path output
+ * @param path The path of the directory
+ */
+void http_format_index(char *buffer, char *path) {
+  int length = strlen(path) + strlen("/index.html") + 1;
+  snprintf(buffer, length, "%s/index.html", path);
+}
+
+/**
+ * Returns the HTTP Content-Type based on a file name.
+ * 
+ * @param file_name The name of the file
+ */
 char *http_get_mime_type(char *file_name) {
   char *file_extension = strrchr(file_name, '.');
   if (file_extension == NULL) {
@@ -128,25 +210,4 @@ char *http_get_mime_type(char *file_name) {
   } else {
     return "text/plain";
   }
-}
-
-/*
- * Puts `<a href="/path/filename">filename</a><br/>` into the provided buffer.
- * The resulting string in the buffer is null-terminated. It is the caller's
- * responsibility to ensure that the buffer has enough space for the resulting string.
- */
-void http_format_href(char *buffer, char *path, char *filename) {
-  int length = strlen("<a href=\"//\"></a><br/>") + strlen(path) + strlen(filename)*2 + 1;
-  snprintf(buffer, length, "<a href=\"/%s/%s\">%s</a><br/>", path, filename, filename);
-}
-
-/*
- * Puts `path/index.html` into the provided buffer.
- * The resulting string in the buffer is null-terminated.
- * It is the caller's responsibility to ensure that the
- * buffer has enough space for the resulting string.
- */
-void http_format_index(char *buffer, char *path) {
-  int length = strlen(path) + strlen("/index.html") + 1;
-  snprintf(buffer, length, "%s/index.html", path);
 }

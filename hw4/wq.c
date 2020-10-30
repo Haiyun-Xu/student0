@@ -1,6 +1,4 @@
-#include <stdlib.h>
 #include "wq.h"
-#include "utlist.h"
 
 /* Initializes a work queue WQ. */
 void wq_init(wq_t *wq) {

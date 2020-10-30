@@ -1,19 +1,24 @@
 CC=gcc
 CFLAGS=-g -ggdb3 -Wall -std=gnu99
 LDFLAGS=-pthread
-EXECUTABLES=httpserver forkserver threadserver poolserver
-SOURCE=httpserver.c libhttp.c wq.c
+EXECUTABLES=basicserver forkserver threadserver poolserver
+SOURCE=server.c
+HELPERS=wq.c server_config.c http_helper.c server_signal.c
+OBJECTS=$(HELPERS:.c=.o)
 
 all: $(EXECUTABLES)
 
-httpserver: $(SOURCE)
-	$(CC) $(CFLAGS) $(LDFLAGS) -D BASICSERVER $(SOURCE) -o $@
-forkserver: $(SOURCE)
-	$(CC) $(CFLAGS) $(LDFLAGS) -D FORKSERVER $(SOURCE) -o $@
-threadserver: $(SOURCE)
-	$(CC) $(CFLAGS) $(LDFLAGS) -D THREADSERVER $(SOURCE) -o $@
-poolserver: $(SOURCE)
-	$(CC) $(CFLAGS) $(LDFLAGS) -D POOLSERVER $(SOURCE) -o $@
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+basicserver: $(OBJECTS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -D BASICSERVER $(SOURCE) $(OBJECTS) -o $@
+forkserver: $(OBJECTS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -D FORKSERVER $(SOURCE) $(OBJECTS) -o $@
+threadserver: $(OBJECTS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -D THREADSERVER $(SOURCE) $(OBJECTS) -o $@
+poolserver: $(OBJECTS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -D POOLSERVER $(SOURCE) $(OBJECTS) -o $@
 
 clean:
-	rm -f $(EXECUTABLES)
+	rm -f $(EXECUTABLES) ${OBJECTS}
