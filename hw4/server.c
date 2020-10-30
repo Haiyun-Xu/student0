@@ -1043,18 +1043,19 @@ void serve_forever(int *serverSocketFD, void (*requestHandler)(int)) {
      */
     if (processID == -1) {
       perror("Failed to fork child process: ");
+      send_failure_response(connectSocketFD, 500);
       close_socket(connectSocketFD);
       break;
 
       /*
-       * the child process takes care of the client request, shuts down
-       * the client connection, but only closes the server socket without
-       * shutting down its connection, because the parent process is still
-       * listening on it.
+       * the child process closes the server socket, takes care of the
+       * client request, and shuts down the client connection. It only
+       * closes the server socket without shutting down the connection,
+       * because the parent process is still listening on it.
        */
     } else if (processID == 0) {
-      requestHandler(connectSocketFD);
       close(*serverSocketFD);
+      requestHandler(connectSocketFD);
       printf("Child process exiting\n");
       exit(EXIT_SUCCESS);
     }
