@@ -1,17 +1,16 @@
-CFLAGS=-g -Wall -std=c99 -D_POSIX_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -fPIC
+CFLAGS=-g -Wall -std=c99 -D_POSIX_SOURCE -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=700 -fPIC
 TEST_CFLAGS=-Wl,-rpath=.
 TEST_LDFLAGS=-ldl
+OBJECTS=debug.o list.o mm_alloc.o
 
-all: hw3lib.so mm_test
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $^
 
 hw3lib.so: mm_alloc.o
-	gcc -shared -o $@ $^
-
-mm_alloc.o: mm_alloc.c
-	gcc $(CFLAGS) -c -o $@ $^
+	$(CC) -shared -o $@ $^
 
 mm_test: mm_test.c
-	gcc $(CFLAGS) $(TEST_CFLAGS) -o $@ $^ $(TEST_LDFLAGS)
+	$(CC) $(CFLAGS) $(TEST_CFLAGS) -o $@ $^ $(TEST_LDFLAGS)
 
 clean:
-	rm -rf hw3lib.so mm_alloc.o mm_test
+	rm -rf hw3lib.so mm_test *.o
