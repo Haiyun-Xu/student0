@@ -1,10 +1,12 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
-#include "userprog/gdt.h"
 #include "threads/interrupt.h"
+#include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/gdt.h"
+#include "userprog/pagedir.h"
 #include "userprog/syscall.h"
 
 /* Number of page faults processed. */
@@ -110,6 +112,49 @@ kill (struct intr_frame *f)
     }
 }
 
+/**
+ * Resolve page faults caused by stack growth by mapping the faulting page to a
+ * new physical page.
+ * 
+ * @param flags Page allocation configuration
+ * @param virtual_address The address that cause the page fault
+ * 
+ * @return void
+ */
+static void
+resolve_page_fault_from_stack_growth(enum palloc_flags flags, void *virtual_address) {
+   // edge cases
+   if (virtual_address == NULL) {
+      printf("Cannot map page to the provided virtual address\n");
+      return;
+   }
+
+   void *virtual_page_address = pg_round_down(virtual_address);
+   struct thread *t = thread_current();
+
+   // do not allocate a new page if the given virtual page already exist
+   if (pagedir_get_page(t->pagedir, virtual_page_address) != NULL) {
+      printf("The provided virtual address is already mapped\n");
+   } else {
+      void *kernel_virtual_page_address = palloc_get_page(flags);
+      /*
+       * if no free page is available in the selected pool, terminate the
+       * thread with status -1
+       */
+      if (kernel_virtual_page_address == NULL) {
+         syscall_exit(-1);
+      }
+
+      // free the page and terminate the thread if the mapping failed
+      if (!pagedir_set_page(t->pagedir, virtual_page_address, kernel_virtual_page_address, true)) {
+         palloc_free_page(kernel_virtual_page_address);
+         thread_exit();
+      }
+   }
+
+   return;
+}
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -122,8 +167,11 @@ kill (struct intr_frame *f)
    description of "Interrupt 14--Page Fault Exception (#PF)" in
    [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
 static void
-page_fault (struct intr_frame *f)
-{
+page_fault (struct intr_frame *f) {
+  // the number of bytes by which a push/pusha instruction decrements the esp
+  int PUSH_DECREMENT = 4;
+  int PUSHA_DECREMENT = 32;
+
   bool not_present;  /* True: not-present page, false: writing r/o page. */
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
@@ -151,31 +199,138 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
   struct thread* t = thread_current ();
+   
+  /*
+   * if the page was present and the page fault was due to a violation of
+   * access rights (writing to code region, read/write violation user accessing
+   * kernel space, etc), then the page fault couldn't have been caused by stack
+   * growth; page faults caused by stack growth will always be triggered by
+   * an address on an unmapped page.
+   * 
+   * two types of stack growth could cause a page fault:
+   * 1) accessing an uninitialized local variable or address on the stack;
+   * 2) initializing arguments and frame data on the stack;
+   */
+  if (!not_present) {
+     syscall_exit(-1);
+  } else {
+     /*
+      * if the address was accessed by user, the thread couldn't have been in
+      * a syscall, and the address couldn't have belonged to the kernel space
+      */
+     if (user && !t->in_syscall && is_user_vaddr(fault_addr)) {
+        /*
+         * if the fauling user address is above the user stack pointer, then
+         * this page fault was caused by type 1 stack growth (user thread
+         * accessing uninitialized data on user stack), and could be either
+         * a read or a write access
+         */
+        if (fault_addr >= f->esp) {
+           resolve_page_fault_from_stack_growth(PAL_ZERO|PAL_USER, fault_addr);
+           return;
+
+           /*
+            * if the faulting user address is below the user stack pointer, and
+            * it was a write access, then this page fault was caused by type 2
+            * stack growth (user thread initializing arguments on user stack)
+            */
+        } else if (
+           fault_addr < f->esp
+           && write
+           && (
+              (uint8_t *) fault_addr == (uint8_t *) f->esp - PUSH_DECREMENT
+              || (uint8_t *) fault_addr == (uint8_t *) f->esp - PUSHA_DECREMENT
+           )
+        ) {
+           resolve_page_fault_from_stack_growth(PAL_ZERO|PAL_USER, fault_addr);
+           return;
+
+           /*
+            * otherwise, the page fault was not caused by stack growth, so
+            * maintain the original behavior of exiting with -1 status
+            */
+        } else {
+           syscall_exit(-1);
+        }
+     } else if (!user) {
+        /*
+         * if the address was accessed by kernel and the address belongs to user
+         * space, then the kernel thread must have been in a syscall (i.e.
+         * software interrupt), because hardware interrupt usually doesn't
+         * involve the kernel accessing user space address (except in the case
+         * of upcall), and PINTOS does not support upcall
+         */
+        if (is_user_vaddr(fault_addr) && t->in_syscall) {
+           /*
+            * since PINTOS does not support upcall and the kernel returns
+            * syscall results via registers (so the kernel never pushes
+            * arguments onto user stack), the only possible stack growth that
+            * could cause a page fault at this time is a type 1 stack growth
+            * (kernel thread accessing uninitialized data on user stack), so
+            * the faulting user address must be above the user stack pointer.
+            * 
+            * Note that it was a kernel thread that triggered the page fault
+            * and gets interrupted, so the interrupt states in the intr_frame
+            * argument, including the ESP/stack pointer, belongs to the kernel
+            * thread. However, since the faulting address belongs to the user
+            * space, only the user stack pointer can tell us whether the access
+            * was caused by a stack growth. Fortunately, the interrupted kernel
+            * thread was in a syscall, and the syscall handler perserves and
+            * exposes the user intr_frame pointer for this use case.
+            */
+           if (fault_addr >= ((struct intr_frame *) USER_INTR_FRAME_PTR)->esp) {
+              resolve_page_fault_from_stack_growth(PAL_ZERO, fault_addr);
+              return;
+
+              /*
+               * otherwise, the user thread passed an invalid adress as the
+               * syscall argument, and it should be terminated with -1 status
+               */
+           } else {
+              syscall_exit(-1);
+           }
+
+           /*
+            * else if the address was accessed by kernel and the address belongs
+            * to kernel space, then whether the kernel thread was in a syscall is
+            * no longer important
+            */
+        } else if (!is_user_vaddr(fault_addr)) {
+            /*
+             * if the fauling kernel address is above the kernel stack pointer,
+             * then this page fault was caused by type 1 stack growth (kernel
+             * thread accessing uninitialized data on kernel stack), and could be
+             * either a read or a write access
+             */
+            if (fault_addr >= f->esp) {
+               resolve_page_fault_from_stack_growth(PAL_ZERO, fault_addr);
+               return;
+
+             /*
+              * if the faulting kernel address is below the kernel stack pointer,
+              * and it was a write access, then this page fault was caused by
+              * type 2 stack growth (kernel thread initializing arguments on
+              * kernel stack)
+              */
+            } else if (
+               fault_addr < f->esp
+               && write
+               && (
+                  (uint8_t *) fault_addr == (uint8_t *) f->esp - PUSH_DECREMENT
+                  || (uint8_t *) fault_addr == (uint8_t *) f->esp - PUSHA_DECREMENT
+               )
+            ) {
+               resolve_page_fault_from_stack_growth(PAL_ZERO, fault_addr);
+               return;
+            }
+        }
+     }
+  }
 
   /*
-   * If we faulted on a user address in kernel mode while handling a syscall,
-   * then it's because the user provided invalid syscall arguments. Our checks
-   * in syscall.c only check that the addresses provided are in the user
-   * region of the address space, so if any of the pages backing the addresses
-   * provided by the user turn out to be unmapped, we'll take a page fault in
-   * the kernel and end up here. These checks below will allow us to determine
-   * that this happened and terminate the process appropriately.
+   * printing page fault context to catch faults that were missed by the
+   * conditions above.
    */
-  if (!user && t->in_syscall && is_user_vaddr (fault_addr))
-    syscall_exit (-1);
-
-  /*
-   * If we faulted in user mode, then we assume it's an invalid memory access
-   * and terminate the process. In Homework 5, Part A, you should no longer
-   * assume this; depending on the nature of the fault, the stack may need to
-   * be grown.
-   */
-  if (user)
-    syscall_exit (-1);
-
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
   printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
           not_present ? "not present" : "rights violation",

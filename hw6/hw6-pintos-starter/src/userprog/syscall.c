@@ -104,6 +104,13 @@ syscall_handler (struct intr_frame *f)
   uint32_t* args = (uint32_t*) f->esp;
   struct thread* t = thread_current ();
   t->in_syscall = true;
+  /*
+   * in case the syscall triggers a page fault on a user address and needs the
+   * user stack pointer to determine if the stack should be automatically
+   * extended, the user intr_frame pointer is preserved and exposed for external
+   * references
+   */
+  USER_INTR_FRAME_PTR = (void *) f;
 
   validate_buffer_in_user_region (args, sizeof(uint32_t));
   switch (args[0])
@@ -141,5 +148,6 @@ syscall_handler (struct intr_frame *f)
       break;
     }
 
+  USER_INTR_FRAME_PTR = NULL;
   t->in_syscall = false;
 }
