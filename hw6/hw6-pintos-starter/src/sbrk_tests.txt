@@ -1,0 +1,73 @@
+master branch: 29 failed, 7 passed
+  sbrk: 15 failed;
+  malloc: 6 failed, 1 passed;
+  realloc: 4 failed;
+  pt: 4 failed, 6 passed
+
+feature branch: 10 failed
+  sbrk: 15 passed;
+  malloc: 6 failed, 1 passed;
+  realloc: 4 failed;
+  pt: 10 passed
+
+PASSED:
+  pass tests/memory/sbrk-page
+  pass tests/memory/sbrk-small
+  pass tests/memory/sbrk-none
+  pass tests/memory/sbrk-multi
+  pass tests/memory/sbrk-zero
+  pass tests/memory/sbrk-rv
+  pass tests/memory/sbrk-large
+  pass tests/memory/sbrk-mebi
+  pass tests/memory/sbrk-fail-1
+  pass tests/memory/sbrk-fail-2
+  pass tests/memory/sbrk-many
+  pass tests/memory/sbrk-dealloc
+  pass tests/memory/sbrk-counter
+  pass tests/memory/sbrk-oom-1
+  pass tests/memory/sbrk-oom-2
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-page -a sbrk-page --swap-size=4 -- -q  -f run sbrk-page 
+perl -I../.. ../tests/memory/sbrk-page.ck build/tests/memory/sbrk-page build/tests/memory/sbrk-page.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-none -a sbrk-none --swap-size=4 -- -q  -f run sbrk-none 
+perl -I../.. ../tests/memory/sbrk-none.ck build/tests/memory/sbrk-none build/tests/memory/sbrk-none.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-multi -a sbrk-multi --swap-size=4 -- -q  -f run sbrk-multi 
+perl -I../.. ../tests/memory/sbrk-multi.ck build/tests/memory/sbrk-multi build/tests/memory/sbrk-multi.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-fail-2 -a sbrk-fail-2 --swap-size=4 -- -q  -f run sbrk-fail-2 
+perl -I../.. ../tests/memory/sbrk-fail-2.ck build/tests/memory/sbrk-fail-2 build/tests/memory/sbrk-fail-2.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p  build/tests/memory/sbrk-zero -a sbrk-zero --swap-size=4 -- -q  -f run sbrk-zero
+perl -I../.. ../tests/memory/sbrk-zero.ck  build/tests/memory/sbrk-zero  build/tests/memory/sbrk-zero.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-small -a sbrk-small --swap-size=4 -- -q  -f run sbrk-small 
+perl -I../.. ../tests/memory/sbrk-small.ck build/tests/memory/sbrk-small build/tests/memory/sbrk-small.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-rv -a sbrk-rv --swap-size=4 -- -q  -f run sbrk-rv 
+perl -I../.. ../tests/memory/sbrk-rv.ck build/tests/memory/sbrk-rv build/tests/memory/sbrk-rv.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-large -a sbrk-large --swap-size=4 -- -q  -f run sbrk-large 
+perl -I../.. ../tests/memory/sbrk-large.ck build/tests/memory/sbrk-large build/tests/memory/sbrk-large.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-mebi -a sbrk-mebi --swap-size=4 -- -q  -f run sbrk-mebi 
+perl -I../.. ../tests/memory/sbrk-mebi.ck build/tests/memory/sbrk-mebi build/tests/memory/sbrk-mebi.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-fail-1 -a sbrk-fail-1 --swap-size=4 -- -q  -f run sbrk-fail-1 
+perl -I../.. ../tests/memory/sbrk-fail-1.ck build/tests/memory/sbrk-fail-1 build/tests/memory/sbrk-fail-1.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-many -a sbrk-many --swap-size=4 -- -q  -f run sbrk-many 
+perl -I../.. ../tests/memory/sbrk-many.ck build/tests/memory/sbrk-many build/tests/memory/sbrk-many.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-dealloc -a sbrk-dealloc --swap-size=4 -- -q  -f run sbrk-dealloc 
+perl -I../.. ../tests/memory/sbrk-dealloc.ck build/tests/memory/sbrk-dealloc build/tests/memory/sbrk-dealloc.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-counter -a sbrk-counter --swap-size=4 -- -q  -f run sbrk-counter 
+perl -I../.. ../tests/memory/sbrk-counter.ck build/tests/memory/sbrk-counter build/tests/memory/sbrk-counter.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-oom-1 -a sbrk-oom-1 --swap-size=4 -- -q  -f run sbrk-oom-1 
+perl -I../.. ../tests/memory/sbrk-oom-1.ck build/tests/memory/sbrk-oom-1 build/tests/memory/sbrk-oom-1.result
+
+pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-oom-2 -a sbrk-oom-2 --swap-size=4 -- -q  -f run sbrk-oom-2 
+perl -I../.. ../tests/memory/sbrk-oom-2.ck build/tests/memory/sbrk-oom-2 build/tests/memory/sbrk-oom-2.result

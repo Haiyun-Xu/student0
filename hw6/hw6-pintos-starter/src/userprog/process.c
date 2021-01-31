@@ -299,6 +299,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
               if (!load_segment (file, file_page, (void *) mem_page,
                                  read_bytes, zero_bytes, writable))
                 goto done;
+              /**
+               * After every loaded segment, we should refresh the starting and
+               * breaking heap pointer, which should point at the start of the
+               * page following the last loaded page.
+               */
+              t->heap_start = t->heap_break = (void *)(mem_page + read_bytes + zero_bytes);
             }
           else
             goto done;

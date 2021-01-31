@@ -98,6 +98,8 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    void *heap_start;                   /* Start address of the process's heap segment */
+    void *heap_break;                   /* Break address of the process's heap segment */
 
     struct file* open_file;             /* Single open file supported. */
     bool in_syscall;                    /* Stores if we are in a syscall. */
