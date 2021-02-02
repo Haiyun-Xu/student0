@@ -1,0 +1,61 @@
+master branch: 10 failed
+  sbrk: 15 passed;
+  malloc: 6 failed, 1 passed;
+  realloc: 4 failed;
+  pt: 10 passed;
+
+feature branch: 0 failed
+  sbrk: 15 passed;
+  malloc: 7 passed;
+  realloc: 4 passed;
+  pt: 10 passed;
+
+
+PASSED:
+  pass tests/memory/malloc-free
+  pass tests/memory/malloc-simple
+  pass tests/memory/malloc-null
+  pass tests/memory/malloc-fit
+  pass tests/memory/malloc-fail
+  pass tests/memory/malloc-merge-1
+  pass tests/memory/malloc-merge-2
+
+  pass tests/memory/realloc-1
+  pass tests/memory/realloc-null
+  pass tests/memory/realloc-2
+  pass tests/memory/realloc-3
+
+
+pintos -v -k --gdb -T 60 --bochs  --filesys-size=2 -p build/tests/memory/malloc-simple -a malloc-simple --swap-size=4 -- -q  -f run malloc-simple 
+perl -I../.. ../tests/memory/malloc-simple.ck build/tests/memory/malloc-simple build/tests/memory/malloc-simple.result
+pass tests/memory/malloc-simple
+
+pintos -v -k --gdb -T 60 --bochs  --filesys-size=2 -p build/tests/memory/malloc-null -a malloc-null --swap-size=4 -- -q  -f run malloc-null 
+perl -I../.. ../tests/memory/malloc-null.ck build/tests/memory/malloc-null build/tests/memory/malloc-null.result
+
+pintos -v -k --gdb -T 60 --bochs  --filesys-size=2 -p build/tests/memory/malloc-free -a malloc-free --swap-size=4 -- -q  -f run malloc-free 
+perl -I../.. ../tests/memory/malloc-free.ck build/tests/memory/malloc-free build/tests/memory/malloc-free.result
+
+pintos -v -k --gdb -T 60 --bochs  --filesys-size=2 -p build/tests/memory/realloc-1 -a realloc-1 --swap-size=4 -- -q  -f run realloc-1 
+perl -I../.. ../tests/memory/realloc-1.ck build/tests/memory/realloc-1 build/tests/memory/realloc-1.result
+
+pintos -v -k --gdb -T 60 --bochs  --filesys-size=2 -p build/tests/memory/realloc-null -a realloc-null --swap-size=4 -- -q  -f run realloc-null 
+perl -I../.. ../tests/memory/realloc-null.ck build/tests/memory/realloc-null build/tests/memory/realloc-null.result
+
+pintos -v -k --gdb -T 60 --bochs  --filesys-size=2 -p build/tests/memory/malloc-fit -a malloc-fit --swap-size=4 -- -q  -f run malloc-fit 
+perl -I../.. ../tests/memory/malloc-fit.ck build/tests/memory/malloc-fit build/tests/memory/malloc-fit.result
+
+pintos -v -k --gdb -T 60 --bochs  --filesys-size=2 -p build/tests/memory/malloc-fail -a malloc-fail --swap-size=4 -- -q  -f run malloc-fail 
+perl -I../.. ../tests/memory/malloc-fail.ck build/tests/memory/malloc-fail build/tests/memory/malloc-fail.result
+
+pintos -v -k --gdb -T 60 --bochs  --filesys-size=2 -p build/tests/memory/malloc-merge-1 -a malloc-merge-1 --swap-size=4 -- -q  -f run malloc-merge-1 
+perl -I../.. ../tests/memory/malloc-merge-1.ck build/tests/memory/malloc-merge-1 build/tests/memory/malloc-merge-1.result
+
+pintos -v -k --gdb -T 60 --bochs  --filesys-size=2 -p build/tests/memory/malloc-merge-2 -a malloc-merge-2 --swap-size=4 -- -q  -f run malloc-merge-2 
+perl -I../.. ../tests/memory/malloc-merge-2.ck build/tests/memory/malloc-merge-2 build/tests/memory/malloc-merge-2.result
+
+pintos -v -k --gdb -T 60 --bochs  --filesys-size=2 -p build/tests/memory/realloc-2 -a realloc-2 --swap-size=4 -- -q  -f run realloc-2 
+perl -I../.. ../tests/memory/realloc-2.ck build/tests/memory/realloc-2 build/tests/memory/realloc-2.result
+
+pintos -v -k --gdb -T 60 --bochs  --filesys-size=2 -p build/tests/memory/realloc-3 -a realloc-3 --swap-size=4 -- -q  -f run realloc-3 
+perl -I../.. ../tests/memory/realloc-3.ck build/tests/memory/realloc-3 build/tests/memory/realloc-3.result

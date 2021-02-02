@@ -1,3 +1,23 @@
+feature branch: 25 failed, 11 passed
+  sbrk: 15 failed;
+  malloc: 6 failed, 1 passed;
+  realloc: 4 failed;
+  pt: 10 passed;
+
+
+PASSED:
+    pass tests/memory/pt-bad-addr
+    pass tests/memory/pt-bad-read
+    pass tests/memory/pt-grow-bad
+    pass tests/memory/pt-stk-oflow
+    pass tests/memory/pt-write-code
+    pass tests/memory/pt-write-code2
+    pass tests/memory/pt-big-stk-obj
+    pass tests/memory/pt-grow-pusha
+    pass tests/memory/pt-grow-stack
+    pass tests/memory/pt-grow-stk-sc
+    
+
 pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-bad-addr -a pt-bad-addr -- -q -f run pt-bad-addr < /dev/null > build/tests/memory/pt-bad-addr.output 2> build/tests/memory/pt-bad-addr.errors
 perl -I.. ../tests/memory/pt-bad-addr.ck build/tests/memory/pt-bad-addr build/tests/memory/pt-bad-addr.result
 
@@ -27,33 +47,3 @@ perl -I.. ../tests/memory/pt-grow-stk-sc.ck build/tests/memory/pt-grow-stk-sc bu
 
 pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-stk-oflow -a pt-stk-oflow -- -q -f run pt-stk-oflow < /dev/null > build/tests/memory/pt-stk-oflow.output 2> build/tests/memory/pt-stk-oflow.errors
 perl -I.. ../tests/memory/pt-stk-oflow.ck build/tests/memory/pt-stk-oflow build/tests/memory/pt-stk-oflow.result
-
-List of test results in MASTER: 29/36 failed
-15 sbrk failed; 6 malloc failed, 1 passed; 4 realloc failed, 4 pt failed, 6 passed;
-pass
-    pass tests/memory/pt-bad-addr
-    pass tests/memory/pt-bad-read
-    pass tests/memory/pt-grow-bad
-    pass tests/memory/pt-stk-oflow
-    pass tests/memory/pt-write-code
-    pass tests/memory/pt-write-code2
-fail
-    FAIL tests/memory/pt-big-stk-obj
-    FAIL tests/memory/pt-grow-pusha
-    FAIL tests/memory/pt-grow-stack
-    FAIL tests/memory/pt-grow-stk-sc
-
-List of test results in FEATURE: 32/36 failed
-15 sbrk failed; 6 malloc failed, 1 passed; 4 realloc failed; 7 pt failed, 3 passed;
-pass
-    pass tests/memory/pt-bad-addr
-    pass tests/memory/pt-bad-read
-    pass tests/memory/pt-grow-bad
-    pass tests/memory/pt-stk-oflow
-    pass tests/memory/pt-write-code
-    pass tests/memory/pt-write-code2
-    pass tests/memory/pt-big-stk-obj
-    pass tests/memory/pt-grow-pusha
-    pass tests/memory/pt-grow-stack
-    pass tests/memory/pt-grow-stk-sc
-    

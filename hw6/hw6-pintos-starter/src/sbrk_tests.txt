@@ -2,13 +2,14 @@ master branch: 29 failed, 7 passed
   sbrk: 15 failed;
   malloc: 6 failed, 1 passed;
   realloc: 4 failed;
-  pt: 4 failed, 6 passed
+  pt: 4 failed, 6 passed;
 
-feature branch: 10 failed
+feature branch: 10 failed, 26 passed
   sbrk: 15 passed;
   malloc: 6 failed, 1 passed;
   realloc: 4 failed;
-  pt: 10 passed
+  pt: 10 passed;
+
 
 PASSED:
   pass tests/memory/sbrk-page
@@ -26,6 +27,7 @@ PASSED:
   pass tests/memory/sbrk-counter
   pass tests/memory/sbrk-oom-1
   pass tests/memory/sbrk-oom-2
+
 
 pintos --gdb -v -k -T 60 --bochs  --filesys-size=2 -p build/tests/memory/sbrk-page -a sbrk-page --swap-size=4 -- -q  -f run sbrk-page 
 perl -I../.. ../tests/memory/sbrk-page.ck build/tests/memory/sbrk-page build/tests/memory/sbrk-page.result
