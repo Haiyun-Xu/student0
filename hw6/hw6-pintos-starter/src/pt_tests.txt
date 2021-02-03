@@ -1,0 +1,49 @@
+feature branch: 25 failed, 11 passed
+  sbrk: 15 failed;
+  malloc: 6 failed, 1 passed;
+  realloc: 4 failed;
+  pt: 10 passed;
+
+
+PASSED:
+    pass tests/memory/pt-bad-addr
+    pass tests/memory/pt-bad-read
+    pass tests/memory/pt-grow-bad
+    pass tests/memory/pt-stk-oflow
+    pass tests/memory/pt-write-code
+    pass tests/memory/pt-write-code2
+    pass tests/memory/pt-big-stk-obj
+    pass tests/memory/pt-grow-pusha
+    pass tests/memory/pt-grow-stack
+    pass tests/memory/pt-grow-stk-sc
+    
+
+pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-bad-addr -a pt-bad-addr -- -q -f run pt-bad-addr < /dev/null > build/tests/memory/pt-bad-addr.output 2> build/tests/memory/pt-bad-addr.errors
+perl -I.. ../tests/memory/pt-bad-addr.ck build/tests/memory/pt-bad-addr build/tests/memory/pt-bad-addr.result
+
+pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-bad-read -a pt-bad-read -p ../tests/memory/sample.txt -a sample.txt -- -q -f run pt-bad-read < /dev/null > build/tests/memory/pt-bad-read.output 2> build/tests/memory/pt-bad-read.errors
+perl -I.. ../tests/memory/pt-bad-read.ck build/tests/memory/pt-bad-read build/tests/memory/pt-bad-read.result
+
+pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-grow-bad -a pt-grow-bad -- -q -f run pt-grow-bad < /dev/null > build/tests/memory/pt-grow-bad.output 2> build/tests/memory/pt-grow-bad.errors
+perl -I.. ../tests/memory/pt-grow-bad.ck build/tests/memory/pt-grow-bad build/tests/memory/pt-grow-bad.result
+
+pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-big-stk-obj -a pt-big-stk-obj -- -q -f run pt-big-stk-obj < /dev/null > build/tests/memory/pt-big-stk-obj.output 2> build/tests/memory/pt-big-stk-obj.errors
+perl -I.. ../tests/memory/pt-big-stk-obj.ck build/tests/memory/pt-big-stk-obj build/tests/memory/pt-big-stk-obj.result
+
+pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-write-code -a pt-write-code -- -q -f run pt-write-code < /dev/null > build/tests/memory/pt-write-code.output 2> build/tests/memory/pt-write-code.errors
+perl -I.. ../tests/memory/pt-write-code.ck build/tests/memory/pt-write-code build/tests/memory/pt-write-code.result
+
+pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-write-code2 -a pt-write-code2 -p ../tests/memory/sample.txt -a sample.txt -- -q -f run pt-write-code2 < /dev/null > build/tests/memory/pt-write-code2.output 2> build/tests/memory/pt-write-code2.errors
+perl -I.. ../tests/memory/pt-write-code2.ck build/tests/memory/pt-write-code2 build/tests/memory/pt-write-code2.result
+
+pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-grow-pusha -a pt-grow-pusha -- -q -f run pt-grow-pusha < /dev/null > build/tests/memory/pt-grow-pusha.output 2> build/tests/memory/pt-grow-pusha.errors
+perl -I.. ../tests/memory/pt-grow-pusha.ck build/tests/memory/pt-grow-pusha build/tests/memory/pt-grow-pusha.result
+
+pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-grow-stack -a pt-grow-stack -- -q -f run pt-grow-stack < /dev/null > build/tests/memory/pt-grow-stack.output 2> build/tests/memory/pt-grow-stack.errors
+perl -I.. ../tests/memory/pt-grow-stack.ck build/tests/memory/pt-grow-stack build/tests/memory/pt-grow-stack.result
+
+pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-grow-stk-sc -a pt-grow-stk-sc -p ../../tests/memory/sample.txt -a sample.txt -- -q -f run pt-grow-stk-sc < /dev/null > build/tests/memory/pt-grow-stk-sc.output 2> build/tests/memory/pt-grow-stk-sc.errors
+perl -I.. ../tests/memory/pt-grow-stk-sc.ck build/tests/memory/pt-grow-stk-sc build/tests/memory/pt-grow-stk-sc.result
+
+pintos -v -k -T 60 --bochs --filesys-size=2 --swap-size=4 -p build/tests/memory/pt-stk-oflow -a pt-stk-oflow -- -q -f run pt-stk-oflow < /dev/null > build/tests/memory/pt-stk-oflow.output 2> build/tests/memory/pt-stk-oflow.errors
+perl -I.. ../tests/memory/pt-stk-oflow.ck build/tests/memory/pt-stk-oflow build/tests/memory/pt-stk-oflow.result
