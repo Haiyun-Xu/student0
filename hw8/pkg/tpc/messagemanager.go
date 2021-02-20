@@ -69,7 +69,7 @@ func newTPCMsgClient(hostname string) tpc_pb.TwoPhaseCommit_TPCMsgClient {
 			glog.Errorf("Error dialing %s: %v", hostname, err)
 			continue
 		}
-		glog.Infof("Dailed %s", hostname)
+		glog.Infof("Dialed %s", hostname)
 		client, err := tpc_pb.NewTwoPhaseCommitClient(newConnection).TPCMsg(context.Background())
 		if err != nil {
 			glog.Errorf("Error creating client for	 %s: %v", hostname, err)

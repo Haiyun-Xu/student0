@@ -139,9 +139,9 @@ func (j *FileJournal) Append(e Entry) error {
 }
 
 // NewIterator returns an EntryIterator for the journal.
-func (l *FileJournal) NewIterator() *EntryIterator {
+func (j *FileJournal) NewIterator() *EntryIterator {
 	return &EntryIterator{
-		cur: l.start,
+		cur: j.start,
 	}
 }
 
