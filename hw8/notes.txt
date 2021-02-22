@@ -1,0 +1,37 @@
+Directories:
+/api: contains the gRPC interface between clients and leader, and points to the leader service that actually implements Get and Put;
+
+/pkg: contains the source code of the Go program;
+
+/pkg/kvstore: contains the KV store inplementation, which takes a directory and stores each KV entry as a separate file in that directory;
+
+/pkg/journal: contains the journaling implementation, which takes a file path and each log/entry is stored as a line in that file. The journal has the following API:
+
+- NewFileJournal(path string) (Journal, error): given a file path, returns a Journal based on that file. If the file doesn't already exist, it is created; if the file already exists, its entries are used to build the Journal;
+- Size() int: returns the #entries in the journal;
+- Empty(): resets the in-memory linked list entries and truncates the journal file entries;
+- Append(e Entry) error: append an entry to the journal by adding it to the in-memory linked list and writing it to the file;
+- NewIterator() *EntryIterator: reurns an iterator over the in-memory list of entries;
+
+/pkg/rpc: contains the gRPC interface between leader and followers, defines the underlying message streaming service, as well as the structure of the message;
+
+/pkg/tpc: contains the two phase commit implementation, as well as the gRPC stub framework that realizes both the KV store and tpc interfaces;
+
+Running and testing the program:
+go fmt -l -w <dir>: reformats the Golang files in <dir>, overwriting the original source code;
+
+go build -mod vendor -o tpc main.go: build the program into the "tpc" binary;
+
+go test -mod vendor <dir>: run the unit tests in <dir>; if <dir> is empty, run the tests in the current directory; if <dir> is ./.., run the tests in all sub directories;
+
+cd test && python3 tpc.py <#followers>: starts a cluster with the specified # of followers and one leader (exposed at localhost:50000);
+
+cd test && python3 client.py <leader_url>: run end-to-end tests on the cluster;
+
+cd test && python3 test.py: run the provided test suite;
+
+
+
+
+tests should contain TPC follower commit, TPC follower abort, TPC leader commit, TPC leader abot, and E2E (put and get).
+I can make up for E2E put, TPC follower/leader abort

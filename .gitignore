@@ -32,6 +32,8 @@
 .DS_Store
 *.swp
 tags
+**/__pycache__/
+*.out
 
 # HW0
 hw0/limits
@@ -51,3 +53,6 @@ hw1/fwords
 
 # HW5
 hw5/**/build
+
+# HW8
+hw8/tpc
